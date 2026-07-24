@@ -16,7 +16,7 @@ import VerificarDocumentos from './pages/Inventario/VerificarDocumentos.jsx'
 import DocumentosIndex from './pages/Documentos/Index.jsx'
 import NotaDespacho from './pages/Documentos/NotaDespacho.jsx'
 import ReporteIncidentes from './pages/Documentos/ReporteIncidentes.jsx'
-import ReporteImpreso from './pages/Documentos/ReporteImpreso.jsx'
+//import ReporteImpreso from './pages/Documentos/ReporteImpreso.jsx'
 import OrdenPreparacion from './pages/Documentos/OrdenPreparacion.jsx'
 import InformeBaja from './pages/Documentos/InformeBaja.jsx'
 
@@ -41,7 +41,7 @@ export default function App() {
       <Route path="/documentos" element={<DocumentosIndex />} />
       <Route path="/documentos/nota-despacho" element={<NotaDespacho />} />
       <Route path="/documentos/reporte-incidentes" element={<ReporteIncidentes />} />
-      <Route path="/documentos/reporte-impreso" element={<ReporteImpreso />} />
+      {/* <Route path="/documentos/reporte-impreso" element={<ReporteImpreso />} /> */}
       <Route path="/documentos/orden-preparacion" element={<OrdenPreparacion />} />
       <Route path="/documentos/informe-baja" element={<InformeBaja />} />
 
@@ -51,3 +51,4 @@ export default function App() {
     </Routes>
   )
 }
+
