@@ -14,6 +14,12 @@ const NavIcon = ({ path }) => {
         <path d="M20 7H4a2 2 0 00-2 2v6a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2zM16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/>
       </svg>
     ),
+    ventas: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+        <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/>
+      </svg>
+    ),
     documentos: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -53,6 +59,9 @@ export default function Navbar() {
       </NavLink>
       <NavLink to="/inventario" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
         <NavIcon path="inventario" /> Inventario
+      </NavLink>
+      <NavLink to="/ventas" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
+        <NavIcon path="ventas" /> Ventas
       </NavLink>
       <NavLink to="/documentos" className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
         <NavIcon path="documentos" /> Documentos

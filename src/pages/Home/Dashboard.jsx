@@ -97,6 +97,12 @@ export default function Dashboard() {
 
         <div className="section-heading mt-3">Acceso rápido</div>
         <div className="menu-grid">
+          <Link className="menu-card" to="/inventario">
+            <svg className="menu-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 5v14"/><path d="M5 12h14"/><rect x="3" y="3" width="18" height="18" rx="2"/>
+            </svg>
+            <span className="menu-card-label">Crear producto</span>
+          </Link>
           <Link className="menu-card" to="/inventario/registrar-entrada">
             <svg className="menu-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
