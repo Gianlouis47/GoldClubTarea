@@ -1,621 +1,303 @@
 -- =========================================
 -- GOLDCREW INVENTARIO DATABASE
--- PostgreSQL
+-- PostgreSQL / Supabase
+-- =========================================
+-- ADVERTENCIA: Este schema refleja el estado ACTUAL de la BD en Supabase.
+-- Las tablas que ya existen NO deben recrearse (se perderían datos).
+-- Para tablas nuevas, usar database/migraciones_nuevas_tablas.sql
 -- =========================================
 
 -- =========================================
 -- ROLES
 -- =========================================
 
-CREATE TABLE roles (
-    id SERIAL PRIMARY KEY,
-    nombre VARCHAR(50) NOT NULL UNIQUE,
-    descripcion TEXT,
-    activo BOOLEAN NOT NULL DEFAULT true,
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS public.roles (
+  id integer NOT NULL DEFAULT nextval('roles_id_seq'::regclass),
+  nombre character varying NOT NULL UNIQUE,
+  descripcion text,
+  activo boolean NOT NULL DEFAULT true,
+  creado_en timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT roles_pkey PRIMARY KEY (id)
 );
 
 -- =========================================
 -- CATEGORIAS
 -- =========================================
 
-CREATE TABLE categorias (
-    id SERIAL PRIMARY KEY,
-    nombre VARCHAR(100) NOT NULL UNIQUE,
-    descripcion TEXT,
-    activo BOOLEAN NOT NULL DEFAULT true,
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS public.categorias (
+  id integer NOT NULL DEFAULT nextval('categorias_id_seq'::regclass),
+  nombre character varying NOT NULL UNIQUE,
+  descripcion text,
+  activo boolean NOT NULL DEFAULT true,
+  creado_en timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT categorias_pkey PRIMARY KEY (id)
 );
 
 -- =========================================
 -- UBICACIONES
 -- =========================================
 
-CREATE TABLE ubicaciones (
-    id SERIAL PRIMARY KEY,
-    nombre VARCHAR(100) NOT NULL,
-    descripcion TEXT,
-    activo BOOLEAN NOT NULL DEFAULT true,
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS public.ubicaciones (
+  id integer NOT NULL DEFAULT nextval('ubicaciones_id_seq'::regclass),
+  nombre character varying NOT NULL,
+  descripcion text,
+  activo boolean NOT NULL DEFAULT true,
+  creado_en timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT ubicaciones_pkey PRIMARY KEY (id)
 );
 
 -- =========================================
 -- PROVEEDORES
 -- =========================================
 
-CREATE TABLE proveedores (
-    id SERIAL PRIMARY KEY,
-
-    nombre_empresa VARCHAR(150) NOT NULL,
-    contacto_nombre VARCHAR(100),
-
-    telefono VARCHAR(20),
-    correo VARCHAR(150),
-
-    direccion TEXT,
-
-    rnc VARCHAR(20),
-
-    activo BOOLEAN NOT NULL DEFAULT true,
-
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS public.proveedores (
+  id integer NOT NULL DEFAULT nextval('proveedores_id_seq'::regclass),
+  nombre_empresa character varying NOT NULL,
+  contacto_nombre character varying,
+  telefono character varying,
+  correo character varying,
+  direccion text,
+  rnc character varying,
+  activo boolean NOT NULL DEFAULT true,
+  creado_en timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT proveedores_pkey PRIMARY KEY (id)
 );
 
 -- =========================================
 -- USUARIOS
 -- =========================================
 
-CREATE TABLE usuarios (
-    id SERIAL PRIMARY KEY,
-
-    rol_id INTEGER NOT NULL,
-
-    nombre VARCHAR(100) NOT NULL,
-    apellido VARCHAR(100) NOT NULL,
-
-    correo VARCHAR(150) NOT NULL UNIQUE,
-
-    username VARCHAR(50) NOT NULL UNIQUE,
-
-    password_hash TEXT NOT NULL,
-
-    activo BOOLEAN NOT NULL DEFAULT true,
-
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_usuarios_roles
-        FOREIGN KEY (rol_id)
-        REFERENCES roles(id)
+CREATE TABLE IF NOT EXISTS public.usuarios (
+  id integer NOT NULL DEFAULT nextval('usuarios_id_seq'::regclass),
+  rol_id integer NOT NULL,
+  nombre character varying NOT NULL,
+  apellido character varying NOT NULL,
+  correo character varying NOT NULL UNIQUE,
+  username character varying NOT NULL UNIQUE,
+  password_hash text NOT NULL,
+  activo boolean NOT NULL DEFAULT true,
+  creado_en timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT usuarios_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_usuarios_roles FOREIGN KEY (rol_id) REFERENCES public.roles(id)
 );
 
 -- =========================================
 -- PRODUCTOS
 -- =========================================
 
-CREATE TABLE productos (
-    id SERIAL PRIMARY KEY,
-
-    categoria_id INTEGER NOT NULL,
-    proveedor_id INTEGER,
-    ubicacion_id INTEGER,
-
-    nombre VARCHAR(150) NOT NULL,
-
-    descripcion TEXT,
-
-    codigo_sku VARCHAR(50) NOT NULL UNIQUE,
-
-    marca VARCHAR(100),
-    modelo VARCHAR(100),
-
-    precio_compra NUMERIC(10,2) NOT NULL,
-    precio_venta NUMERIC(10,2) NOT NULL,
-
-    stock INTEGER NOT NULL DEFAULT 0,
-    stock_minimo INTEGER NOT NULL DEFAULT 0,
-
-    unidad_medida VARCHAR(20) NOT NULL,
-
-    activo BOOLEAN NOT NULL DEFAULT true,
-
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_productos_categorias
-        FOREIGN KEY (categoria_id)
-        REFERENCES categorias(id),
-
-    CONSTRAINT fk_productos_proveedores
-        FOREIGN KEY (proveedor_id)
-        REFERENCES proveedores(id),
-
-    CONSTRAINT fk_productos_ubicaciones
-        FOREIGN KEY (ubicacion_id)
-        REFERENCES ubicaciones(id)
+CREATE TABLE IF NOT EXISTS public.productos (
+  id integer NOT NULL DEFAULT nextval('productos_id_seq'::regclass),
+  categoria_id integer NOT NULL,
+  proveedor_id integer,
+  ubicacion_id integer,
+  nombre character varying NOT NULL,
+  descripcion text,
+  codigo_sku character varying NOT NULL UNIQUE,
+  marca character varying,
+  modelo character varying,
+  precio_compra numeric NOT NULL,
+  precio_venta numeric NOT NULL,
+  stock integer NOT NULL DEFAULT 0,
+  stock_minimo integer NOT NULL DEFAULT 0,
+  unidad_medida character varying NOT NULL,
+  activo boolean NOT NULL DEFAULT true,
+  creado_en timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  estado text DEFAULT 'activo'::text,
+  CONSTRAINT productos_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_productos_categorias FOREIGN KEY (categoria_id) REFERENCES public.categorias(id),
+  CONSTRAINT fk_productos_proveedores FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id),
+  CONSTRAINT fk_productos_ubicaciones FOREIGN KEY (ubicacion_id) REFERENCES public.ubicaciones(id)
 );
 
 -- =========================================
 -- LOTES
 -- =========================================
 
-CREATE TABLE lotes (
-    id SERIAL PRIMARY KEY,
-
-    producto_id INTEGER NOT NULL,
-
-    codigo_lote VARCHAR(100) NOT NULL,
-
-    fecha_entrada DATE NOT NULL,
-
-    fecha_vencimiento DATE,
-
-    cantidad INTEGER NOT NULL,
-
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_lotes_productos
-        FOREIGN KEY (producto_id)
-        REFERENCES productos(id)
+CREATE TABLE IF NOT EXISTS public.lotes (
+  id integer NOT NULL DEFAULT nextval('lotes_id_seq'::regclass),
+  producto_id integer NOT NULL,
+  codigo_lote character varying NOT NULL,
+  fecha_entrada date NOT NULL,
+  fecha_vencimiento date,
+  cantidad integer NOT NULL,
+  creado_en timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT lotes_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_lotes_productos FOREIGN KEY (producto_id) REFERENCES public.productos(id)
 );
 
 -- =========================================
 -- ENTRADAS
 -- =========================================
 
-CREATE TABLE entradas (
-    id SERIAL PRIMARY KEY,
-
-    usuario_id INTEGER NOT NULL,
-    proveedor_id INTEGER,
-
-    fecha TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    numero_factura VARCHAR(100),
-
-    observaciones TEXT,
-
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_entradas_usuarios
-        FOREIGN KEY (usuario_id)
-        REFERENCES usuarios(id),
-
-    CONSTRAINT fk_entradas_proveedores
-        FOREIGN KEY (proveedor_id)
-        REFERENCES proveedores(id)
+CREATE TABLE IF NOT EXISTS public.entradas (
+  id integer NOT NULL DEFAULT nextval('entradas_id_seq'::regclass),
+  usuario_id integer NOT NULL,
+  proveedor_id integer,
+  fecha timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  numero_factura character varying,
+  observaciones text,
+  creado_en timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT entradas_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_entradas_usuarios FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id),
+  CONSTRAINT fk_entradas_proveedores FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id)
 );
 
 -- =========================================
 -- DETALLE ENTRADAS
 -- =========================================
 
-CREATE TABLE detalle_entradas (
-    id SERIAL PRIMARY KEY,
-
-    entrada_id INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-
-    cantidad INTEGER NOT NULL,
-
-    precio_unitario NUMERIC(10,2) NOT NULL,
-
-    subtotal NUMERIC(10,2) NOT NULL,
-
-    CONSTRAINT fk_detalle_entradas_entrada
-        FOREIGN KEY (entrada_id)
-        REFERENCES entradas(id),
-
-    CONSTRAINT fk_detalle_entradas_producto
-        FOREIGN KEY (producto_id)
-        REFERENCES productos(id)
+CREATE TABLE IF NOT EXISTS public.detalle_entradas (
+  id integer NOT NULL DEFAULT nextval('detalle_entradas_id_seq'::regclass),
+  entrada_id integer NOT NULL,
+  producto_id integer NOT NULL,
+  cantidad integer NOT NULL,
+  precio_unitario numeric NOT NULL,
+  subtotal numeric NOT NULL,
+  CONSTRAINT detalle_entradas_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_detalle_entradas_entrada FOREIGN KEY (entrada_id) REFERENCES public.entradas(id),
+  CONSTRAINT fk_detalle_entradas_producto FOREIGN KEY (producto_id) REFERENCES public.productos(id)
 );
 
 -- =========================================
 -- SALIDAS
 -- =========================================
 
-CREATE TABLE salidas (
-    id SERIAL PRIMARY KEY,
-
-    usuario_id INTEGER NOT NULL,
-
-    fecha TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    tipo_salida VARCHAR(50) NOT NULL,
-
-    destinatario VARCHAR(150),
-
-    observaciones TEXT,
-
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_salidas_usuarios
-        FOREIGN KEY (usuario_id)
-        REFERENCES usuarios(id)
+CREATE TABLE IF NOT EXISTS public.salidas (
+  id integer NOT NULL DEFAULT nextval('salidas_id_seq'::regclass),
+  usuario_id integer NOT NULL,
+  fecha timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  tipo_salida character varying NOT NULL,
+  destinatario character varying,
+  observaciones text,
+  creado_en timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT salidas_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_salidas_usuarios FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
 );
 
 -- =========================================
 -- DETALLE SALIDAS
 -- =========================================
 
-CREATE TABLE detalle_salidas (
-    id SERIAL PRIMARY KEY,
-
-    salida_id INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-
-    cantidad INTEGER NOT NULL,
-
-    CONSTRAINT fk_detalle_salidas_salida
-        FOREIGN KEY (salida_id)
-        REFERENCES salidas(id),
-
-    CONSTRAINT fk_detalle_salidas_producto
-        FOREIGN KEY (producto_id)
-        REFERENCES productos(id)
+CREATE TABLE IF NOT EXISTS public.detalle_salidas (
+  id integer NOT NULL DEFAULT nextval('detalle_salidas_id_seq'::regclass),
+  salida_id integer NOT NULL,
+  producto_id integer NOT NULL,
+  cantidad integer NOT NULL,
+  CONSTRAINT detalle_salidas_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_detalle_salidas_salida FOREIGN KEY (salida_id) REFERENCES public.salidas(id),
+  CONSTRAINT fk_detalle_salidas_producto FOREIGN KEY (producto_id) REFERENCES public.productos(id)
 );
 
 -- =========================================
 -- MOVIMIENTOS INVENTARIO
 -- =========================================
 
-CREATE TABLE movimientos_inventario (
-    id SERIAL PRIMARY KEY,
-
-    producto_id INTEGER NOT NULL,
-    usuario_id INTEGER NOT NULL,
-
-    tipo_movimiento VARCHAR(20) NOT NULL,
-
-    cantidad INTEGER NOT NULL,
-
-    referencia VARCHAR(100),
-
-    observaciones TEXT,
-
-    fecha TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_movimientos_productos
-        FOREIGN KEY (producto_id)
-        REFERENCES productos(id),
-
-    CONSTRAINT fk_movimientos_usuarios
-        FOREIGN KEY (usuario_id)
-        REFERENCES usuarios(id)
+CREATE TABLE IF NOT EXISTS public.movimientos_inventario (
+  id integer NOT NULL DEFAULT nextval('movimientos_inventario_id_seq'::regclass),
+  producto_id integer NOT NULL,
+  usuario_id integer NOT NULL,
+  tipo_movimiento character varying NOT NULL,
+  cantidad integer NOT NULL,
+  referencia character varying,
+  observaciones text,
+  fecha timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT movimientos_inventario_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_movimientos_productos FOREIGN KEY (producto_id) REFERENCES public.productos(id),
+  CONSTRAINT fk_movimientos_usuarios FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
 );
 
 -- =========================================
 -- AUDITORIA
 -- =========================================
 
-CREATE TABLE auditoria (
-    id SERIAL PRIMARY KEY,
-
-    usuario_id INTEGER,
-
-    tabla_afectada VARCHAR(100) NOT NULL,
-
-    accion VARCHAR(50) NOT NULL,
-
-    registro_id INTEGER,
-
-    descripcion TEXT,
-
-    fecha TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_auditoria_usuarios
-        FOREIGN KEY (usuario_id)
-        REFERENCES usuarios(id)
+CREATE TABLE IF NOT EXISTS public.auditoria (
+  id integer NOT NULL DEFAULT nextval('auditoria_id_seq'::regclass),
+  usuario_id integer,
+  tabla_afectada character varying NOT NULL,
+  accion character varying NOT NULL,
+  registro_id integer,
+  descripcion text,
+  fecha timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT auditoria_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_auditoria_usuarios FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
 );
 
 -- =========================================
--- INDEXES
+-- INFORME BAJA (tal cual existe en Supabase)
 -- =========================================
 
-CREATE INDEX idx_productos_nombre
-ON productos(nombre);
-
-CREATE INDEX idx_productos_codigo
-ON productos(codigo_sku);
-
-CREATE INDEX idx_movimientos_fecha
-ON movimientos_inventario(fecha);
-
-CREATE INDEX idx_lotes_vencimiento
-ON lotes(fecha_vencimiento);
-
--- =========================================
--- VENTAS
--- =========================================
-
-CREATE TABLE ventas (
-    id SERIAL PRIMARY KEY,
-
-    usuario_id INTEGER NOT NULL,
-
-    fecha TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    cliente_nombre VARCHAR(150) NOT NULL,
-    cliente_direccion TEXT,
-
-    total NUMERIC(12,2) NOT NULL DEFAULT 0,
-
-    metodo_pago VARCHAR(50) DEFAULT 'efectivo',
-
-    estado VARCHAR(20) NOT NULL DEFAULT 'activa',
-
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_ventas_usuarios
-        FOREIGN KEY (usuario_id)
-        REFERENCES usuarios(id)
+CREATE TABLE IF NOT EXISTS public.informe_baja (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  producto_id bigint,
+  usuario_id bigint DEFAULT 1,
+  tipo_movimiento text DEFAULT 'BAJA'::text,
+  cantidad integer NOT NULL,
+  observaciones text,
+  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
+  estado text DEFAULT 'activo'::text,
+  CONSTRAINT informe_baja_pkey PRIMARY KEY (id),
+  CONSTRAINT informe_baja_producto_id_fkey FOREIGN KEY (producto_id) REFERENCES public.productos(id)
 );
 
 -- =========================================
--- DETALLE VENTAS
+-- NOTA DESPACHO (tal cual existe en Supabase)
 -- =========================================
 
-CREATE TABLE detalle_ventas (
-    id SERIAL PRIMARY KEY,
-
-    venta_id INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-
-    cantidad INTEGER NOT NULL,
-
-    precio_unitario NUMERIC(10,2) NOT NULL,
-
-    subtotal NUMERIC(10,2) NOT NULL,
-
-    CONSTRAINT fk_detalle_ventas_venta
-        FOREIGN KEY (venta_id)
-        REFERENCES ventas(id),
-
-    CONSTRAINT fk_detalle_ventas_producto
-        FOREIGN KEY (producto_id)
-        REFERENCES productos(id)
+CREATE TABLE IF NOT EXISTS public.nota_despacho (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  num_nota text,
+  fecha_emision text,
+  direccion text,
+  descripcion text,
+  codigo text,
+  num_orden text,
+  cantidad integer NOT NULL,
+  receptor text,
+  encargado text,
+  estado text DEFAULT 'activo'::text,
+  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
+  CONSTRAINT nota_despacho_pkey PRIMARY KEY (id)
 );
 
 -- =========================================
--- FACTURAS
+-- REPORTE INCIDENTES (tal cual existe en Supabase)
 -- =========================================
 
-CREATE TABLE facturas (
-    id SERIAL PRIMARY KEY,
-
-    venta_id INTEGER,
-
-    numero_factura VARCHAR(100) NOT NULL UNIQUE,
-
-    cliente_nombre VARCHAR(150) NOT NULL,
-    cliente_direccion TEXT,
-
-    fecha TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    total NUMERIC(12,2) NOT NULL DEFAULT 0,
-
-    estado VARCHAR(20) NOT NULL DEFAULT 'activa',
-
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_facturas_ventas
-        FOREIGN KEY (venta_id)
-        REFERENCES ventas(id)
+CREATE TABLE IF NOT EXISTS public.reporte_incidentes (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  num_orden text,
+  fecha_incidente text,
+  codigo_producto text,
+  cantidad integer NOT NULL DEFAULT 0,
+  faltante text,
+  descripcion text,
+  creado_por text DEFAULT 'Juan Pérez'::text,
+  estado text DEFAULT 'activo'::text,
+  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
+  CONSTRAINT reporte_incidentes_pkey PRIMARY KEY (id)
 );
 
 -- =========================================
--- DETALLE FACTURAS
+-- ORDEN PREPARACION (tal cual existe en Supabase)
 -- =========================================
 
-CREATE TABLE detalle_facturas (
-    id SERIAL PRIMARY KEY,
-
-    factura_id INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-
-    cantidad INTEGER NOT NULL,
-
-    precio_unitario NUMERIC(10,2) NOT NULL,
-
-    subtotal NUMERIC(10,2) NOT NULL,
-
-    CONSTRAINT fk_detalle_facturas_factura
-        FOREIGN KEY (factura_id)
-        REFERENCES facturas(id),
-
-    CONSTRAINT fk_detalle_facturas_producto
-        FOREIGN KEY (producto_id)
-        REFERENCES productos(id)
+CREATE TABLE IF NOT EXISTS public.orden_preparacion (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  num_orden text,
+  codigo text,
+  cantidad integer NOT NULL DEFAULT 0,
+  destino text,
+  creado_por text DEFAULT 'Juan Pérez'::text,
+  estado text DEFAULT 'activo'::text,
+  created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
+  CONSTRAINT orden_preparacion_pkey PRIMARY KEY (id)
 );
 
 -- =========================================
--- ORDENES DE COMPRA
+-- INDEXES EXISTENTES
 -- =========================================
 
-CREATE TABLE ordenes_compra (
-    id SERIAL PRIMARY KEY,
-
-    proveedor_id INTEGER,
-    usuario_id INTEGER NOT NULL,
-
-    numero_orden VARCHAR(100) NOT NULL UNIQUE,
-
-    fecha TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
-
-    observaciones TEXT,
-
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_ordenes_compra_proveedores
-        FOREIGN KEY (proveedor_id)
-        REFERENCES proveedores(id),
-
-    CONSTRAINT fk_ordenes_compra_usuarios
-        FOREIGN KEY (usuario_id)
-        REFERENCES usuarios(id)
-);
-
--- =========================================
--- DETALLE ORDEN DE COMPRA
--- =========================================
-
-CREATE TABLE detalle_orden_compra (
-    id SERIAL PRIMARY KEY,
-
-    orden_compra_id INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-
-    cantidad INTEGER NOT NULL,
-
-    precio_unitario NUMERIC(10,2) NOT NULL,
-
-    subtotal NUMERIC(10,2) NOT NULL,
-
-    CONSTRAINT fk_detalle_orden_compra_orden
-        FOREIGN KEY (orden_compra_id)
-        REFERENCES ordenes_compra(id),
-
-    CONSTRAINT fk_detalle_orden_compra_producto
-        FOREIGN KEY (producto_id)
-        REFERENCES productos(id)
-);
-
--- =========================================
--- INDEXES NUEVOS
--- =========================================
-
-CREATE INDEX idx_ventas_usuario
-ON ventas(usuario_id);
-
-CREATE INDEX idx_ventas_fecha
-ON ventas(fecha);
-
-CREATE INDEX idx_ventas_estado
-ON ventas(estado);
-
-CREATE INDEX idx_detalle_ventas_venta
-ON detalle_ventas(venta_id);
-
-CREATE INDEX idx_detalle_ventas_producto
-ON detalle_ventas(producto_id);
-
-CREATE INDEX idx_facturas_venta
-ON facturas(venta_id);
-
-CREATE INDEX idx_facturas_numero
-ON facturas(numero_factura);
-
-CREATE INDEX idx_facturas_fecha
-ON facturas(fecha);
-
-CREATE INDEX idx_facturas_estado
-ON facturas(estado);
-
-CREATE INDEX idx_detalle_facturas_factura
-ON detalle_facturas(factura_id);
-
-CREATE INDEX idx_detalle_facturas_producto
-ON detalle_facturas(producto_id);
-
-CREATE INDEX idx_ordenes_compra_proveedor
-ON ordenes_compra(proveedor_id);
-
-CREATE INDEX idx_ordenes_compra_usuario
-ON ordenes_compra(usuario_id);
-
-CREATE INDEX idx_ordenes_compra_numero
-ON ordenes_compra(numero_orden);
-
-CREATE INDEX idx_ordenes_compra_estado
-ON ordenes_compra(estado);
-
-CREATE INDEX idx_detalle_orden_compra_orden
-ON detalle_orden_compra(orden_compra_id);
-
-CREATE INDEX idx_detalle_orden_compra_producto
-ON detalle_orden_compra(producto_id);
-
--- =========================================
--- NOTAS DE DESPACHO
--- =========================================
-
-CREATE TABLE nota_despacho (
-    id SERIAL PRIMARY KEY,
-    num_nota VARCHAR(100) NOT NULL UNIQUE,
-    fecha_emision DATE NOT NULL,
-    tipo_nota VARCHAR(20) NOT NULL DEFAULT 'entrega', -- 'entrega' | 'facturacion'
-    num_factura VARCHAR(100), -- referencia a facturas.numero_factura
-    cliente VARCHAR(150),
-    direccion TEXT,
-    items JSONB NOT NULL DEFAULT '[]', -- array de {producto_id, nombre, codigo_sku, cantidad, precio_unitario}
-    observaciones TEXT,
-    encargado VARCHAR(100),
-    estado VARCHAR(20) NOT NULL DEFAULT 'activo',
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_nota_despacho_num_nota ON nota_despacho(num_nota);
-CREATE INDEX idx_nota_despacho_num_factura ON nota_despacho(num_factura);
-CREATE INDEX idx_nota_despacho_fecha ON nota_despacho(fecha_emision);
-CREATE INDEX idx_nota_despacho_estado ON nota_despacho(estado);
-
--- =========================================
--- REPORTE INCIDENTES
--- =========================================
-
-CREATE TABLE reporte_incidentes (
-    id SERIAL PRIMARY KEY,
-    num_orden VARCHAR(100) NOT NULL,
-    fecha_incidente DATE NOT NULL,
-    codigo_producto VARCHAR(100) NOT NULL,
-    cantidad INTEGER NOT NULL DEFAULT 0,
-    descripcion TEXT,
-    creado_por VARCHAR(100),
-    estado VARCHAR(20) NOT NULL DEFAULT 'activo',
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_reporte_incidentes_num_orden ON reporte_incidentes(num_orden);
-CREATE INDEX idx_reporte_incidentes_fecha ON reporte_incidentes(fecha_incidente);
-CREATE INDEX idx_reporte_incidentes_estado ON reporte_incidentes(estado);
-
--- =========================================
--- ORDEN PREPARACION
--- =========================================
-
-CREATE TABLE orden_preparacion (
-    id SERIAL PRIMARY KEY,
-    num_orden VARCHAR(100) NOT NULL UNIQUE,
-    codigo VARCHAR(100) NOT NULL,
-    cantidad INTEGER NOT NULL DEFAULT 0,
-    destino TEXT,
-    creado_por VARCHAR(100),
-    estado VARCHAR(20) NOT NULL DEFAULT 'activo',
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_orden_preparacion_num_orden ON orden_preparacion(num_orden);
-CREATE INDEX idx_orden_preparacion_estado ON orden_preparacion(estado);
-
--- =========================================
--- INFORME BAJA
--- =========================================
-
-CREATE TABLE informe_baja (
-    id SERIAL PRIMARY KEY,
-    producto_id INTEGER NOT NULL,
-    usuario_id INTEGER NOT NULL,
-    cantidad INTEGER NOT NULL,
-    observaciones TEXT,
-    motivo_baja VARCHAR(50) NOT NULL, -- 'expirado', 'roto', 'corrompido', 'consumido', 'otro'
-    estado VARCHAR(20) NOT NULL DEFAULT 'activo',
-    creado_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_informe_baja_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
-    CONSTRAINT fk_informe_baja_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
-);
-
-CREATE INDEX idx_informe_baja_producto ON informe_baja(producto_id);
-CREATE INDEX idx_informe_baja_fecha ON informe_baja(creado_en);
-CREATE INDEX idx_informe_baja_estado ON informe_baja(estado);
-CREATE INDEX idx_informe_baja_motivo ON informe_baja(motivo_baja);
+CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos(nombre);
+CREATE INDEX IF NOT EXISTS idx_productos_codigo ON productos(codigo_sku);
+CREATE INDEX IF NOT EXISTS idx_movimientos_fecha ON movimientos_inventario(fecha);
+CREATE INDEX IF NOT EXISTS idx_lotes_vencimiento ON lotes(fecha_vencimiento);
