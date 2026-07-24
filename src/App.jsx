@@ -22,6 +22,12 @@ import InformeBaja from './pages/Documentos/InformeBaja.jsx'
 
 import Caducidad from './pages/Tareas/Caducidad.jsx'
 
+import VentasIndex from './pages/Ventas/Index.jsx'
+import NuevaVenta from './pages/Ventas/NuevaVenta.jsx'
+import OrdenCompra from './pages/Ventas/OrdenCompra.jsx'
+import Recepcion from './pages/Ventas/Recepcion.jsx'
+import HistorialVentas from './pages/Ventas/Historial.jsx'
+
 export default function App() {
   return (
     <Routes>
@@ -29,7 +35,8 @@ export default function App() {
       <Route path="/dashboard" element={<Dashboard />} />
       <Route path="/menu" element={<Menu />} />
 
-      <Route path="/inventario" element={<CrearProducto />} /> 
+      <Route path="/inventario" element={<CrearProducto />} />
+      <Route path="/inventario/crear-producto" element={<CrearProducto />} />
       
       <Route path="/inventario/registrar-entrada" element={<RegistrarEntrada />} />
       <Route path="/inventario/registrar-salida" element={<RegistrarSalida />} />
@@ -44,6 +51,12 @@ export default function App() {
       {/* <Route path="/documentos/reporte-impreso" element={<ReporteImpreso />} /> */}
       <Route path="/documentos/orden-preparacion" element={<OrdenPreparacion />} />
       <Route path="/documentos/informe-baja" element={<InformeBaja />} />
+
+      <Route path="/ventas" element={<VentasIndex />} />
+      <Route path="/ventas/nueva-venta" element={<NuevaVenta />} />
+      <Route path="/ventas/orden-compra" element={<OrdenCompra />} />
+      <Route path="/ventas/recepcion" element={<Recepcion />} />
+      <Route path="/ventas/historial" element={<HistorialVentas />} />
 
       <Route path="/tareas" element={<Caducidad />} />
 
