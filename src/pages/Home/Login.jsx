@@ -1,36 +1,110 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Modal from '../../components/Modal.jsx'
-import { supabase } from '../../lib/supabase.js'
+import { supabase, supabaseConfigurado, MENSAJE_SIN_CONFIGURAR } from '../../lib/supabase.js'
+import { mensajeError } from '../../lib/errores.js'
+import { guardarUsuario, cerrarSesion } from '../../lib/sesion.js'
 
 export default function Login() {
   const navigate = useNavigate()
   const [usuario, setUsuario] = useState('')
   const [contrasena, setContrasena] = useState('')
-  const [modal, setModal] = useState(null) 
+  const [mensaje, setMensaje] = useState(null)
+  const [cargando, setCargando] = useState(false)
+
+  // Antes este formulario mandaba lo escrito en "Nombre de usuario"
+  // directamente como email a supabase.auth.signInWithPassword(), asi que
+  // escribir "admin" nunca podia funcionar. Ahora se acepta cualquiera de los
+  // dos y se resuelve el correo contra la tabla `usuarios`.
+  const resolverCorreo = async (entrada) => {
+    if (entrada.includes('@')) return { correo: entrada, error: null }
+
+    const { data, error } = await supabase
+      .from('usuarios')
+      .select('correo')
+      .eq('username', entrada)
+      .maybeSingle()
+
+    if (error) return { correo: null, error }
+    if (!data) {
+      return {
+        correo: null,
+        error: {
+          message:
+            `El usuario "${entrada}" no existe en la tabla usuarios. ` +
+            'Puedes entrar tambien escribiendo tu correo completo.',
+        },
+      }
+    }
+    return { correo: data.correo, error: null }
+  }
 
   const handleLogin = async (e) => {
-    e.preventDefault()
-    if (!usuario || !contrasena) {
-      setModal('error')
+    e?.preventDefault()
+
+    if (!supabaseConfigurado) {
+      setMensaje(MENSAJE_SIN_CONFIGURAR)
+      return
+    }
+    if (!usuario.trim() || !contrasena) {
+      setMensaje('Escribe tu usuario (o correo) y tu contrasena.')
       return
     }
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: usuario,
+    setCargando(true)
+    cerrarSesion()
+
+    const { correo, error: errorCorreo } = await resolverCorreo(usuario.trim())
+    if (!correo) {
+      setMensaje(mensajeError(errorCorreo, 'identificar el usuario'))
+      setCargando(false)
+      return
+    }
+
+    // La contrasena la valida Supabase Auth: nunca se compara en el navegador
+    // ni se guarda en texto plano (Guia Tecnica, seccion 40.5).
+    const { error: errorAuth } = await supabase.auth.signInWithPassword({
+      email: correo,
       password: contrasena,
     })
 
-    if (error) {
-      setModal('error')
-    } else {
-      navigate('/dashboard')
+    if (errorAuth) {
+      const esCredencial = /invalid login credentials/i.test(errorAuth.message || '')
+      setMensaje(
+        esCredencial
+          ? 'Usuario o contrasena incorrectos. Si es la primera vez que entras, ' +
+            `el usuario ${correo} debe estar creado en Supabase -> Authentication -> Users ` +
+            '(ver el apartado "Primer acceso" del README).'
+          : mensajeError(errorAuth, 'iniciar sesion')
+      )
+      setCargando(false)
+      return
     }
+
+    // Guardamos la fila de `usuarios` porque las ordenes y los movimientos
+    // necesitan un usuario_id entero valido (antes estaba fijo en 1).
+    const { data: fila } = await supabase
+      .from('usuarios')
+      .select('id, nombre, apellido, correo, username, rol_id')
+      .eq('correo', correo)
+      .maybeSingle()
+
+    if (fila) {
+      guardarUsuario(fila)
+    } else {
+      console.warn(
+        `[Gold Club] El correo ${correo} entro por Supabase Auth pero no tiene ` +
+          'fila en la tabla usuarios. Los documentos se guardaran sin autor.'
+      )
+    }
+
+    setCargando(false)
+    navigate('/dashboard')
   }
 
   return (
     <div className="login-page">
-      <div className="login-box">
+      <form className="login-box" onSubmit={handleLogin}>
         <svg width="80" height="80" viewBox="0 0 80 80" className="login-logo" xmlns="http://www.w3.org/2000/svg">
           <circle cx="40" cy="40" r="38" fill="#2c2c2c" stroke="#D4A017" strokeWidth="3"/>
           <text x="40" y="50" textAnchor="middle" fontSize="32" fontWeight="bold" fill="#D4A017" fontFamily="serif">G</text>
@@ -45,7 +119,8 @@ export default function Login() {
           </svg>
           <input
             type="text"
-            placeholder="Nombre de usuario"
+            placeholder="Usuario o correo"
+            autoComplete="username"
             value={usuario}
             onChange={e => setUsuario(e.target.value)}
           />
@@ -57,21 +132,32 @@ export default function Login() {
           </svg>
           <input
             type="password"
-            placeholder="Contraseña"
+            placeholder="Contrasena"
+            autoComplete="current-password"
             value={contrasena}
             onChange={e => setContrasena(e.target.value)}
           />
         </div>
 
-        <button className="login-btn" onClick={handleLogin}>Iniciar Sesión</button>
-        <span className="forgot-link" onClick={() => setModal('error')}>¿Olvidaste tu contraseña?</span>
-      </div>
+        <button className="login-btn" type="submit" disabled={cargando}>
+          {cargando ? 'Verificando...' : 'Iniciar Sesion'}
+        </button>
+        <span
+          className="forgot-link"
+          onClick={() => setMensaje(
+            'La contrasena se restablece desde Supabase -> Authentication -> Users, ' +
+            'con la opcion "Send password recovery".'
+          )}
+        >
+          Olvidaste tu contrasena?
+        </span>
+      </form>
 
       <Modal
-        show={modal === 'error'}
-        message="Inicio de sesión incorrecto. Por favor verifique su usuario y contraseña."
+        show={!!mensaje}
+        message={mensaje}
         actions={
-          <button className="btn btn-gold" onClick={() => setModal(null)}>Reintentar</button>
+          <button className="btn btn-gold" onClick={() => setMensaje(null)}>Entendido</button>
         }
       />
     </div>
