@@ -74,10 +74,10 @@ export default function CrearProducto() {
       estado: 'activo'
     })
 
-    if (error) { 
+    if (error) {
       console.error("Error al insertar:", error)
-      setModal('errorCampos')
-      return 
+      setModal(error.connection || error.message?.includes('fetch') ? 'errorConexion' : 'errorInsert')
+      return
     }
     
     setModal('ok_crear')
@@ -404,7 +404,11 @@ export default function CrearProducto() {
       </div>
       <Modal show={modal === 'ok_crear'} message="Se ha creado con éxito el producto."
         actions={<button className="btn btn-gold" onClick={cerrarYRefrescar}>✔️ Aceptar</button>}/>
-      <Modal show={modal === 'errorCampos'} message="Debe completar todos los campos obligatorios o verificar la conexión."
+      <Modal show={modal === 'errorCampos'} message="Debe completar todos los campos obligatorios."
+        actions={<button className="btn btn-gold" onClick={() => setModal(null)}>✔️ Aceptar</button>}/>
+      <Modal show={modal === 'errorInsert'} message="Error al guardar el producto. Verifique que el código SKU no esté repetido."
+        actions={<button className="btn btn-gold" onClick={() => setModal(null)}>✔️ Aceptar</button>}/>
+      <Modal show={modal === 'errorConexion'} message="No se pudo conectar con la base de datos. Verifique la conexión a internet y las credenciales de Supabase."
         actions={<button className="btn btn-gold" onClick={() => setModal(null)}>✔️ Aceptar</button>}/>
     </Layout>
   )

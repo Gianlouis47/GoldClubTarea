@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/Layout.jsx'
 import Modal from '../../components/Modal.jsx'
 import { supabase } from '../../lib/supabase.js'
+import { mensajeError } from '../../lib/errores.js'
 
 export default function GenerarAlerta() {
   const navigate = useNavigate()
@@ -11,8 +12,17 @@ export default function GenerarAlerta() {
   const [modal, setModal] = useState(null)
 
   const handleGenerar = async () => {
-    if (!codigo) return
-    const { data } = await supabase.from('productos').select('id,nombre,stock,stock_minimo').eq('codigo_sku', codigo)
+    if (!codigo.trim()) {
+      setMensajes([{ color: 'var(--danger)', text: '⚠ Escribe el código del producto.' }])
+      return
+    }
+    const { data, error } = await supabase
+      .from('productos').select('id,nombre,stock,stock_minimo').eq('codigo_sku', codigo.trim())
+    // Antes un error de la base de datos se confundia con "producto no encontrado".
+    if (error) {
+      setMensajes([{ color: 'var(--danger)', text: '⚠ ' + mensajeError(error, 'consultar el producto') }])
+      return
+    }
     if (!data?.length) {
       setMensajes([{ color:'var(--danger)', text: `⚠ Producto con código "${codigo}" no encontrado.` }])
       return

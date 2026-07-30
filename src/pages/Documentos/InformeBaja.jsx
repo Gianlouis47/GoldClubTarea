@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/Layout.jsx'
 import Modal from '../../components/Modal.jsx'
 import { supabase } from '../../lib/supabase.js'
+import { mensajeError } from '../../lib/errores.js'
+import { usuarioIdValido } from '../../lib/sesion.js'
 
 export default function InformeBaja() {
   const navigate = useNavigate()
@@ -14,65 +16,15 @@ export default function InformeBaja() {
   const [modal, setModal] = useState(null)
   const [busqueda, setBusqueda] = useState('')
   
-  const [form, setForm] = useState({ codigo: '', motivo: '', motivoOtro: '', nota: '', cantidad: '', fecha: hoy })
+  const [form, setForm] = useState({ codigo: '', motivo: '', cantidad: '', fecha: hoy })
   const [editandoId, setEditandoId] = useState(null)
   const [cantidadOriginal, setCantidadOriginal] = useState(0)
-
-  // Estado para el buscador de productos con autocomplete
-  const [resultados, setResultados] = useState([])
-  const [buscando, setBuscando] = useState(false)
-  const [productoSeleccionado, setProductoSeleccionado] = useState(null)
 
   useEffect(() => {
     cargarBajas()
   }, [])
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
-
-  // Construye el texto de observaciones a partir del motivo preseleccionado y la nota
-  const construirObservaciones = () => {
-    const motivoFinal = form.motivo === 'Otro' ? (form.motivoOtro || '').trim() : form.motivo
-    const nota = (form.nota || '').trim()
-    if (!motivoFinal && !nota) return ''
-    if (motivoFinal && nota) return `Motivo: ${motivoFinal}. Nota: ${nota}`
-    if (motivoFinal) return `Motivo: ${motivoFinal}`
-    return `Nota: ${nota}`
-  }
-
-  // Devuelve el valor para el campo motivo_baja de la tabla
-  const obtenerMotivoBaja = () => {
-    return form.motivo === 'Otro' ? (form.motivoOtro || '').trim() : form.motivo
-  }
-
-  // Busca productos en Supabase por codigo_sku o nombre (ilike) mientras el usuario escribe
-  const buscarProductos = async (texto) => {
-    setForm(f => ({ ...f, codigo: texto }))
-    setProductoSeleccionado(null)
-    const valor = texto.trim()
-    if (valor.length < 2) {
-      setResultados([])
-      setBuscando(false)
-      return
-    }
-    setBuscando(true)
-    const { data, error } = await supabase
-      .from('productos')
-      .select('id, nombre, codigo_sku, stock')
-      .or(`codigo_sku.ilike.%${valor}%,nombre.ilike.%${valor}%`)
-      .limit(10)
-    if (!error && data) {
-      setResultados(data)
-    } else {
-      setResultados([])
-    }
-    setBuscando(false)
-  }
-
-  const seleccionarProducto = (prod) => {
-    setForm(f => ({ ...f, codigo: prod.codigo_sku }))
-    setProductoSeleccionado(prod)
-    setResultados([])
-  }
 
   const cargarBajas = async () => {
     setCargando(true)
@@ -93,102 +45,120 @@ export default function InformeBaja() {
   }
 
   const irACrear = () => {
-    setForm({ codigo: '', motivo: '', motivoOtro: '', nota: '', cantidad: '', fecha: hoy })
+    setForm({ codigo: '', motivo: '', cantidad: '', fecha: hoy })
     setEditandoId(null)
-    setResultados([])
-    setBuscando(false)
-    setProductoSeleccionado(null)
     setVista('crear')
   }
 
   const handleGenerar = async () => {
-    if (!productoSeleccionado || !form.cantidad) {
-      alert("Por favor, selecciona un producto e introduce la cantidad.")
+    if (!form.codigo || !form.cantidad) {
+      alert("Por favor, introduce el código del producto y la cantidad.")
       return
     }
-    const { data: productos } = await supabase.from('productos').select('id,stock').eq('codigo_sku', productoSeleccionado.codigo_sku)
+    const cant = parseInt(form.cantidad)
+    if (!Number.isFinite(cant) || cant < 1) {
+      alert("La cantidad debe ser un número entero de 1 o más.")
+      return
+    }
+
+    const { data: productos, error: errProd } = await supabase
+      .from('productos').select('id,stock').eq('codigo_sku', form.codigo)
+    if (errProd) { alert(mensajeError(errProd, 'buscar el producto')); return }
     if (!productos?.length) {
       alert("El código de producto no existe.")
       return
     }
 
     const prod = productos[0]
-    const cant = parseInt(form.cantidad)
-    if (prod.stock >= cant) {
-      await supabase.from('productos').update({ stock: prod.stock - cant }).eq('id', prod.id)
-      await supabase.from('informe_baja').insert({
-        producto_id: prod.id, usuario_id: 1, cantidad: cant, observaciones: construirObservaciones(), motivo_baja: obtenerMotivoBaja(), estado: 'activo'
-      })
-      setModal('crear-ok')
-    } else {
+
+    if (prod.stock < cant) {
       alert("La cantidad ingresada supera al stock actual.")
+      return
     }
-  }
 
-  // Parsea observaciones existentes para rellenar el formulario de edición.
-  // Formato esperado: "Motivo: <motivo>. Nota: <nota>" o variantes.
-  const parsearObservaciones = (obs) => {
-    let motivo = ''
-    let motivoOtro = ''
-    let nota = ''
-    const motivosPredefinidos = ['Producto expirado', 'Se rompió', 'Se corrompió', 'Consumido (envase vacío)']
-    if (!obs) return { motivo, motivoOtro, nota }
+    // Antes se descontaba el stock PRIMERO y se insertaba el informe despues
+    // sin comprobar el error: el inventario podia quedar rebajado sin informe.
+    // Ahora se crea el informe y solo entonces se toca el stock.
+    const usuarioId = await usuarioIdValido()
+    const { data: informe, error: errIns } = await supabase.from('informe_baja').insert({
+      producto_id: prod.id,
+      usuario_id: usuarioId ?? undefined,
+      cantidad: cant,
+      observaciones: form.motivo,
+      estado: 'activo'
+    }).select('id').single()
 
-    const motivoMatch = obs.match(/Motivo:\s*(.+?)(?:\.\s*Nota:|$)/i)
-    const notaMatch = obs.match(/Nota:\s*(.+)$/i)
+    if (errIns || !informe) { alert(mensajeError(errIns, 'guardar el informe de baja')); return }
 
-    if (motivoMatch) {
-      const motivoExtraido = motivoMatch[1].trim()
-      if (motivosPredefinidos.includes(motivoExtraido)) {
-        motivo = motivoExtraido
-      } else {
-        motivo = 'Otro'
-        motivoOtro = motivoExtraido
-      }
+    const { error: errStock } = await supabase
+      .from('productos').update({ stock: prod.stock - cant }).eq('id', prod.id)
+
+    if (errStock) {
+      await supabase.from('informe_baja').delete().eq('id', informe.id)
+      alert(mensajeError(errStock, 'descontar el stock') +
+        ' El informe se canceló para que el inventario no quede descuadrado.')
+      return
     }
-    if (notaMatch) nota = notaMatch[1].trim()
 
-    return { motivo, motivoOtro, nota }
+    setModal('crear-ok')
   }
 
   const irAEditar = (baja) => {
     setEditandoId(baja.id)
     setCantidadOriginal(baja.cantidad)
-    const { motivo, motivoOtro, nota } = parsearObservaciones(baja.observaciones)
     setForm({
       codigo: baja.productos?.codigo_sku || '',
-      motivo,
-      motivoOtro,
-      nota,
+      motivo: baja.observaciones || '',
       cantidad: baja.cantidad,
       fecha: new Date(baja.created_at).toLocaleDateString('es-DO')
     })
-    setProductoSeleccionado(baja.productos ? { id: baja.producto_id, ...baja.productos } : null)
-    setResultados([])
     setVista('editar')
   }
 
   const handleActualizar = async () => {
     const cantNueva = parseInt(form.cantidad)
-    if (isNaN(cantNueva) || cantNueva <= 0) {
-      alert("Por favor, introduce una cantidad válida.")
+    if (!form.motivo || isNaN(cantNueva)) return
+
+    // Antes se hacia  baja.producto_id  sin comprobar que `baja` existiera:
+    // si la consulta fallaba, `baja` era null y la pagina se caia con
+    // "Cannot read properties of null" (pantalla en blanco).
+    const { data: baja, error: errBaja } = await supabase
+      .from('informe_baja').select('producto_id').eq('id', editandoId).maybeSingle()
+    if (errBaja) { alert(mensajeError(errBaja, 'buscar el informe')); return }
+    if (!baja?.producto_id) {
+      alert("No se encontró el informe de baja o no tiene producto asociado.")
       return
     }
 
-    const { data: baja } = await supabase.from('informe_baja').select('producto_id').eq('id', editandoId).single()
-    const { data: prod } = await supabase.from('productos').select('stock').eq('id', baja.producto_id).single()
-
-    if (prod) {
-      const stockRecompuesto = prod.stock + cantidadOriginal
-      if (stockRecompuesto < cantNueva) {
-        alert("No hay suficiente stock disponible.")
-        return
-      }
-      await supabase.from('productos').update({ stock: stockRecompuesto - cantNueva }).eq('id', baja.producto_id)
-      const observaciones = construirObservaciones()
-      await supabase.from('informe_baja').update({ cantidad: cantNueva, observaciones: observaciones, motivo_baja: obtenerMotivoBaja() }).eq('id', editandoId)
-      setModal('editar-ok')
+    const { data: prod, error: errProd } = await supabase
+      .from('productos').select('stock').eq('id', baja.producto_id).maybeSingle()
+    if (errProd) { alert(mensajeError(errProd, 'consultar el stock')); return }
+    // Antes, si esto era falsy la funcion terminaba en silencio y el boton
+    // "Guardar cambios" no hacia nada sin explicar por que.
+    if (!prod) {
+      alert("El producto de este informe ya no existe en inventario, no se puede recalcular el stock.")
+      return
     }
+
+    const stockRecompuesto = prod.stock + cantidadOriginal
+    if (stockRecompuesto < cantNueva) {
+      alert("No hay suficiente stock disponible.")
+      return
+    }
+
+    const { error: errUpd } = await supabase.from('informe_baja')
+      .update({ cantidad: cantNueva, observaciones: form.motivo }).eq('id', editandoId)
+    if (errUpd) { alert(mensajeError(errUpd, 'actualizar el informe')); return }
+
+    const { error: errStock } = await supabase.from('productos')
+      .update({ stock: stockRecompuesto - cantNueva }).eq('id', baja.producto_id)
+    if (errStock) {
+      await supabase.from('informe_baja').update({ cantidad: cantidadOriginal }).eq('id', editandoId)
+      alert(mensajeError(errStock, 'recalcular el stock') + ' Se restauró la cantidad anterior.')
+      return
+    }
+
+    setModal('editar-ok')
   }
 
   const handleMoverAPapelera = async (bajaId) => {
@@ -202,16 +172,29 @@ export default function InformeBaja() {
     const confirmar = window.confirm(`¿Deseas reponer las ${cantidad} unidades al producto "${nombre}" y restaurar este informe?`)
     if (!confirmar) return
 
-    const { data: prod } = await supabase.from('productos').select('stock').eq('id', productoId).single()
-    if (prod) {
-      await supabase.from('productos').update({ stock: prod.stock + cantidad }).eq('id', productoId)
-      await supabase.from('informe_baja').update({ estado: 'activo' }).eq('id', bajaId)
-      
-      alert("¡Stock repuesto con éxito e informe restaurado en el historial!")
-      cargarBajas()
-    } else {
+    const { data: prod, error: errProd } = await supabase
+      .from('productos').select('stock').eq('id', productoId).maybeSingle()
+    if (errProd) { alert(mensajeError(errProd, 'consultar el producto')); return }
+    if (!prod) {
       alert("No se pudo encontrar el producto original para reponer las unidades.")
+      return
     }
+
+    const { error: errStock } = await supabase
+      .from('productos').update({ stock: prod.stock + cantidad }).eq('id', productoId)
+    if (errStock) { alert(mensajeError(errStock, 'reponer el stock')); return }
+
+    const { error: errBaja } = await supabase
+      .from('informe_baja').update({ estado: 'activo' }).eq('id', bajaId)
+    if (errBaja) {
+      // Deshacemos la reposicion para no inflar el inventario.
+      await supabase.from('productos').update({ stock: prod.stock }).eq('id', productoId)
+      alert(mensajeError(errBaja, 'restaurar el informe') + ' Se deshizo la reposición de stock.')
+      return
+    }
+
+    alert("¡Stock repuesto con éxito e informe restaurado en el historial!")
+    cargarBajas()
   }
 
   const handleBorrarDefinitivo = async (bajaId) => {
@@ -241,7 +224,7 @@ export default function InformeBaja() {
   return (
     <Layout>
       <div className="main-content">
-      
+        
         {(vista === 'lista' || vista === 'papelera') && (
           <>
             <div className="d-flex justify-content-between align-items-center mb-4" style={{ maxWidth: 1000, margin: '0 auto' }}>
@@ -276,7 +259,7 @@ export default function InformeBaja() {
               <div className="section-heading mb-3">
                 {vista === 'lista' ? 'Registros de Mercancía de Baja' : 'Papelera de Informes'}
               </div>
-            
+              
               <table className="table table-dark table-striped align-middle" style={{ borderCollapse: 'separate', borderSpacing: '0 10px' }}>
                 <thead>
                   <tr>
@@ -330,120 +313,28 @@ export default function InformeBaja() {
             <div className="section-heading" style={{marginTop:0}}>
               {vista === 'crear' ? 'Nuevo Informe de Baja' : 'Modificar Informe de Baja'}
             </div>
-          
+            
             <div className="form-group mb-3">
-              <label>Buscar producto por código o nombre:</label>
-              <input 
-                className="form-control" 
-                type="text" 
-                placeholder="Escribe al menos 2 caracteres para buscar..." 
-                value={form.codigo} 
-                onChange={(e) => buscarProductos(e.target.value)} 
-                disabled={vista === 'editar'} 
-              />
-              {/* Indicador de producto seleccionado o estado de búsqueda */}
-              {productoSeleccionado && (
-                <small className="text-success" style={{display:'block', marginTop:'4px'}}>
-                  ✓ Producto seleccionado: <strong>{productoSeleccionado.nombre}</strong> (Stock: {productoSeleccionado.stock})
-                </small>
-              )}
-              {/* Lista desplegable de resultados de búsqueda */}
-              {vista === 'crear' && resultados.length > 0 && (
-                <ul style={{
-                  listStyle: 'none',
-                  margin: '5px 0 0 0',
-                  padding: 0,
-                  background: 'var(--bg-input, #2a2a2a)',
-                  border: '1px solid #444',
-                  borderRadius: '6px',
-                  maxHeight: '200px',
-                  overflowY: 'auto',
-                  zIndex: 1000,
-                  position: 'relative'
-                }}>
-                  {resultados.map((prod) => (
-                    <li 
-                      key={prod.id} 
-                      onClick={() => seleccionarProducto(prod)}
-                      style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        borderBottom: '1px solid #333',
-                        color: '#fff',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = '#3a3a3a'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    >
-                      <span>
-                        <strong>{prod.codigo_sku}</strong> — {prod.nombre}
-                      </span>
-                      <span style={{ color: '#999', fontSize: '0.85em' }}>
-                        Stock: {prod.stock}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {vista === 'crear' && buscando && (
-                <small className="text-muted" style={{display:'block', marginTop:'4px'}}>
-                  Buscando...
-                </small>
-              )}
+              <label>Código del producto:</label>
+              <input className="form-control" type="text" placeholder="Ej: 14839987325" value={form.codigo} onChange={set('codigo')} disabled={vista === 'editar'} />
             </div>
-          
+            
             <div className="form-group mb-3">
               <label>Motivo de baja:</label>
-              <select 
-                className="form-control" 
-                value={form.motivo} 
-                onChange={set('motivo')}
-              >
-                <option value="">-- Selecciona un motivo --</option>
-                <option value="Producto expirado">Producto expirado</option>
-                <option value="Se rompió">Se rompió</option>
-                <option value="Se corrompió">Se corrompió</option>
-                <option value="Consumido (envase vacío)">Consumido (envase vacío)</option>
-                <option value="Otro">Otro</option>
-              </select>
-              {/* Input adicional cuando se selecciona "Otro" */}
-              {form.motivo === 'Otro' && (
-                <input 
-                  className="form-control" 
-                  type="text" 
-                  placeholder="Escribe el motivo personalizado..." 
-                  value={form.motivoOtro} 
-                  onChange={set('motivoOtro')}
-                  style={{ marginTop: '8px' }}
-                />
-              )}
+              <input className="form-control" type="text" placeholder="Ej: Producto vencido" value={form.motivo} onChange={set('motivo')} />
             </div>
-          
-            <div className="form-group mb-3">
-              <label>Nota / Detalle (opcional):</label>
-              <textarea 
-                className="form-control" 
-                placeholder="Ej: Se cayó la botella y se quebró. Lote vencido en el pasillo 3..." 
-                value={form.nota} 
-                onChange={set('nota')}
-                rows={3}
-                style={{ resize: 'vertical' }}
-              />
-            </div>
-          
+            
             <div className="form-group mb-3">
               <label>Cantidad de producto:</label>
               <input className="form-control" type="number" placeholder="Ej: 10" value={form.cantidad} onChange={set('cantidad')} />
             </div>
-          
+            
             <div className="section-heading mt-4">Detalles de autoría</div>
             <div className="form-group mb-4">
               <label>Creado por:</label>
               <input className="form-control" type="text" value="Juan Pérez" readOnly />
             </div>
-          
+            
             <div className="text-center gap-2 d-flex justify-content-center">
               {vista === 'crear' ? (
                 <button className="btn btn-gold" onClick={handleGenerar}>Generar informe de baja</button>
@@ -456,7 +347,7 @@ export default function InformeBaja() {
         )}
 
       </div>
-    
+      
       <Modal 
         show={modal !== null} 
         message={modal === 'crear-ok' ? "Informe generado con éxito." : "Informe modificado correctamente."}

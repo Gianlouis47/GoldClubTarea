@@ -2,13 +2,17 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/Layout.jsx'
 import Modal from '../../components/Modal.jsx'
-import { supabase } from '../../lib/supabase.js'
+import { supabase, supabaseConfigurado, MENSAJE_SIN_CONFIGURAR } from '../../lib/supabase.js'
+import { mensajeError } from '../../lib/errores.js'
+import { usuarioIdValido, MENSAJE_SIN_USUARIO } from '../../lib/sesion.js'
 
 export default function Recepcion() {
   const navigate = useNavigate()
   const [ordenes, setOrdenes] = useState([])
   const [cargando, setCargando] = useState(true)
   const [modal, setModal] = useState(null)
+  const [aviso, setAviso] = useState(null)
+  const [recibiendo, setRecibiendo] = useState(false)
   const [ordenSel, setOrdenSel] = useState(null)
   const [detalle, setDetalle] = useState([])
 
@@ -17,46 +21,106 @@ export default function Recepcion() {
   }, [])
 
   const cargarOrdenes = async () => {
+    if (!supabaseConfigurado) { setAviso(MENSAJE_SIN_CONFIGURAR); setCargando(false); return }
     setCargando(true)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('ordenes_compra')
       .select('id, numero_orden, estado, observaciones, creado_en, proveedores(nombre_empresa)')
       .order('id', { ascending: false })
-    if (data) setOrdenes(data)
+    if (error) setAviso(mensajeError(error, 'cargar las ordenes de compra'))
+    else setOrdenes(data || [])
     setCargando(false)
   }
 
   const verDetalle = async (orden) => {
     setOrdenSel(orden)
-    const { data } = await supabase
+    setDetalle([])
+    const { data, error } = await supabase
       .from('detalle_orden_compra')
       .select('cantidad, precio_unitario, subtotal, productos(nombre, codigo_sku)')
       .eq('orden_compra_id', orden.id)
-    if (data) setDetalle(data)
+    if (error) { setAviso(mensajeError(error, 'cargar el detalle de la orden')); return }
+    setDetalle(data || [])
   }
 
   const handleRecibir = async () => {
     if (!ordenSel) return
 
-    // Por cada producto del detalle, sumar al stock
-    for (const d of detalle) {
-      const { data: prod } = await supabase.from('productos').select('id,stock').eq('codigo_sku', d.productos?.codigo_sku).single()
-      if (prod) {
-        await supabase.from('productos').update({ stock: prod.stock + d.cantidad }).eq('id', prod.id)
-        await supabase.from('movimientos_inventario').insert({
-          producto_id: prod.id,
-          usuario_id: 1,
-          tipo_movimiento: 'ENTRADA',
-          cantidad: d.cantidad,
-          referencia: `Recepción OC ${ordenSel.numero_orden}`
-        })
-      }
+    // Una orden sin productos se podia "recibir" sin sumar nada al stock y
+    // quedaba marcada como recibida.
+    if (detalle.length === 0) {
+      setAviso(`La orden ${ordenSel.numero_orden} no tiene productos registrados, no hay nada que recibir.`)
+      return
+    }
+    // Evitar recibir dos veces la misma orden (duplicaba el stock).
+    if (ordenSel.estado === 'recibida') {
+      setAviso(`La orden ${ordenSel.numero_orden} ya fue recibida.`)
+      return
     }
 
-    // Marcar orden como recibida
-    await supabase.from('ordenes_compra').update({ estado: 'recibida' }).eq('id', ordenSel.id)
+    const usuarioId = await usuarioIdValido()
+    if (usuarioId == null) { setAviso(MENSAJE_SIN_USUARIO); return }
 
-    setModal('ok')
+    setRecibiendo(true)
+    const fallos = []
+    let recibidos = 0
+
+    for (const d of detalle) {
+      const sku = d.productos?.codigo_sku
+      if (!sku) { fallos.push('una linea sin producto asociado'); continue }
+
+      // Antes se usaba .single(), que devuelve error si el producto no existe;
+      // ese error se ignoraba y la linea se perdia en silencio.
+      const { data: prod, error: errProd } = await supabase
+        .from('productos').select('id,stock').eq('codigo_sku', sku).maybeSingle()
+
+      if (errProd) { fallos.push(`${sku} (${errProd.message})`); continue }
+      if (!prod) { fallos.push(`${sku} (ya no existe en inventario)`); continue }
+
+      const { error: errStock } = await supabase
+        .from('productos').update({ stock: prod.stock + d.cantidad }).eq('id', prod.id)
+      if (errStock) { fallos.push(`${sku} (no se pudo sumar el stock)`); continue }
+
+      const { error: errMov } = await supabase.from('movimientos_inventario').insert({
+        producto_id: prod.id,
+        usuario_id: usuarioId,
+        tipo_movimiento: 'ENTRADA',
+        cantidad: d.cantidad,
+        referencia: `Recepcion OC ${ordenSel.numero_orden}`
+      })
+      if (errMov) console.warn('[Gold Club] No se registro el movimiento de inventario:', errMov)
+
+      recibidos++
+    }
+
+    if (recibidos === 0) {
+      setRecibiendo(false)
+      setAviso(`No se pudo recibir ningun producto de la orden ${ordenSel.numero_orden}. Detalle: ${fallos.join('; ')}.`)
+      return
+    }
+
+    // La orden solo se marca como recibida si TODO entro; si algo fallo se deja
+    // pendiente para poder corregirlo y reintentar.
+    if (fallos.length === 0) {
+      const { error: errEstado } = await supabase
+        .from('ordenes_compra').update({ estado: 'recibida' }).eq('id', ordenSel.id)
+      if (errEstado) {
+        setRecibiendo(false)
+        setAviso(mensajeError(errEstado, 'marcar la orden como recibida') +
+          ' El stock si se actualizo; cambia el estado manualmente para no recibirla dos veces.')
+        return
+      }
+      setRecibiendo(false)
+      setModal('ok')
+    } else {
+      setRecibiendo(false)
+      setAviso(
+        `Se recibieron ${recibidos} de ${detalle.length} productos. La orden queda PENDIENTE. ` +
+        `No se pudo procesar: ${fallos.join('; ')}.`
+      )
+      setOrdenSel(null)
+      cargarOrdenes()
+    }
   }
 
   const pendientes = ordenes.filter(o => o.estado === 'pendiente')
@@ -139,8 +203,15 @@ export default function Recepcion() {
                     ))}
                   </tbody>
                 </table>
+                {detalle.length === 0 && (
+                  <div className="text-muted mb-2" style={{ fontSize: 13 }}>
+                    Esta orden no tiene productos registrados.
+                  </div>
+                )}
                 <div className="modal-actions">
-                  <button className="btn btn-gold" onClick={handleRecibir}>Recibir y sumar al stock</button>
+                  <button className="btn btn-gold" onClick={handleRecibir} disabled={recibiendo || detalle.length === 0}>
+                    {recibiendo ? 'Recibiendo...' : 'Recibir y sumar al stock'}
+                  </button>
                   <button className="btn btn-outline" onClick={() => setOrdenSel(null)}>Cancelar</button>
                 </div>
               </div>
@@ -149,7 +220,9 @@ export default function Recepcion() {
         )}
 
         <Modal show={modal === 'ok'} message="Productos recibidos correctamente. Stock actualizado."
-          actions={<button className="btn btn-gold" onClick={() => { setModal(null); setOrdenSel(null); cargarOrdenes() }}>✔ Aceptar</button>}/>
+          actions={<button className="btn btn-gold" onClick={() => { setModal(null); setOrdenSel(null); cargarOrdenes() }}>&#10004; Aceptar</button>}/>
+        <Modal show={!!aviso} message={aviso}
+          actions={<button className="btn btn-gold" onClick={() => setAviso(null)}>&#10004; Entendido</button>}/>
       </div>
     </Layout>
   )

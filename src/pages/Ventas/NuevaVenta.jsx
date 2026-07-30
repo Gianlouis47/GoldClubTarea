@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/Layout.jsx'
 import Modal from '../../components/Modal.jsx'
 import { supabase } from '../../lib/supabase.js'
+import { mensajeError } from '../../lib/errores.js'
+import { usuarioIdValido, MENSAJE_SIN_USUARIO } from '../../lib/sesion.js'
 
 export default function NuevaVenta() {
   const navigate = useNavigate()
@@ -16,6 +18,8 @@ export default function NuevaVenta() {
   const [numFactura, setNumFactura] = useState('')
   const [modal, setModal] = useState(null)
   const [cargando, setCargando] = useState(false)
+  // Causa real del fallo, para no mostrar solo "Ocurrió un error".
+  const [detalleError, setDetalleError] = useState(null)
 
   useEffect(() => {
     cargarProductos()
@@ -86,16 +90,31 @@ export default function NuevaVenta() {
     // Generar número de factura si no existe
     const facturaNum = numFactura.trim() || `FAC-${Date.now()}`
 
+    // ventas.usuario_id es NOT NULL con FK a usuarios(id). Antes estaba fijo en
+    // 1: si ese usuario no existía, la venta fallaba con el error 23503.
+    const usuarioId = await usuarioIdValido()
+    if (usuarioId == null) {
+      setDetalleError(MENSAJE_SIN_USUARIO)
+      setModal('error')
+      setCargando(false)
+      return
+    }
+
     // 1. Crear la venta
     const { data: ventaData, error: ventaError } = await supabase.from('ventas').insert({
-      usuario_id: 1,
+      usuario_id: usuarioId,
       cliente_nombre: cliente.nombre,
       cliente_direccion: cliente.direccion,
       total: total,
       estado: 'activa'
     }).select()
 
-    if (ventaError) { setModal('error'); setCargando(false); return }
+    if (ventaError || !ventaData?.length) {
+      setDetalleError(mensajeError(ventaError, 'procesar la venta'))
+      setModal('error')
+      setCargando(false)
+      return
+    }
     const ventaId = ventaData[0].id
 
     // 2. Crear los detalles de venta
@@ -137,7 +156,7 @@ export default function NuevaVenta() {
       // Registrar movimiento
       await supabase.from('movimientos_inventario').insert({
         producto_id: item.producto_id,
-        usuario_id: 1,
+        usuario_id: usuarioId,
         tipo_movimiento: 'SALIDA',
         cantidad: parseInt(item.cantidad),
         referencia: `Venta ${facturaNum}`
@@ -267,7 +286,7 @@ export default function NuevaVenta() {
         actions={<button className="btn btn-gold" onClick={() => setModal(null)}>✔ Aceptar</button>}/>
       <Modal show={modal === 'error-stock'} message="Hay productos en la venta que no tienen suficiente stock disponible."
         actions={<button className="btn btn-gold" onClick={() => setModal(null)}>✔ Aceptar</button>}/>
-      <Modal show={modal === 'error'} message="Ocurrió un error al procesar la venta. Intente nuevamente."
+      <Modal show={modal === 'error'} message={detalleError || 'No se pudo procesar la venta.'}
         actions={<button className="btn btn-gold" onClick={() => setModal(null)}>✔ Aceptar</button>}/>
     </Layout>
   )
