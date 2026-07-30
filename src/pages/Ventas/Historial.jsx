@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/Layout.jsx'
 import Modal from '../../components/Modal.jsx'
 import { supabase } from '../../lib/supabase.js'
+import { mensajeError } from '../../lib/errores.js'
 
 export default function HistorialVentas() {
   const navigate = useNavigate()
@@ -12,6 +13,7 @@ export default function HistorialVentas() {
   const [modal, setModal] = useState(null)
   const [ventaSel, setVentaSel] = useState(null)
   const [detalle, setDetalle] = useState([])
+  const [errorCarga, setErrorCarga] = useState(null)
 
   useEffect(() => {
     cargarVentas()
@@ -19,21 +21,25 @@ export default function HistorialVentas() {
 
   const cargarVentas = async () => {
     setCargando(true)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('ventas')
       .select('id, cliente_nombre, cliente_direccion, total, fecha, estado')
       .order('id', { ascending: false })
-    if (data) setVentas(data)
+    // Antes el error se ignoraba y la tabla se quedaba vacia sin explicar nada.
+    if (error) setErrorCarga(mensajeError(error, 'cargar el historial de ventas'))
+    else { setErrorCarga(null); setVentas(data || []) }
     setCargando(false)
   }
 
   const verDetalle = async (venta) => {
     setVentaSel(venta)
-    const { data } = await supabase
+    setDetalle([])
+    const { data, error } = await supabase
       .from('detalle_ventas')
       .select('cantidad, precio_unitario, subtotal, productos(nombre, codigo_sku)')
       .eq('venta_id', venta.id)
-    if (data) setDetalle(data)
+    if (error) { setErrorCarga(mensajeError(error, 'cargar el detalle de la venta')); return }
+    setDetalle(data || [])
   }
 
   const filtradas = ventas.filter(v => {
@@ -62,8 +68,14 @@ export default function HistorialVentas() {
         <div className="card card-gold">
           {cargando ? (
             <div className="text-muted text-center py-4">Cargando ventas...</div>
+          ) : errorCarga ? (
+            <div className="text-center py-4" style={{ color: 'var(--danger)' }}>{errorCarga}</div>
           ) : filtradas.length === 0 ? (
-            <div className="text-muted text-center py-4">No se encontraron ventas.</div>
+            <div className="text-muted text-center py-4">
+              {busqueda
+                ? `Ninguna venta coincide con "${busqueda}".`
+                : 'Todavía no hay ventas registradas.'}
+            </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>

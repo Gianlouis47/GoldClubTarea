@@ -3,22 +3,43 @@ import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/Layout.jsx'
 import Modal from '../../components/Modal.jsx'
 import { supabase } from '../../lib/supabase.js'
+import { mensajeError } from '../../lib/errores.js'
+import { usuarioIdValido, MENSAJE_SIN_USUARIO } from '../../lib/sesion.js'
 
 export default function RegistrarEntrada() {
   const navigate = useNavigate()
   const [form, setForm] = useState({ nombre: '', codigo: '', proveedor: '', cantidad: '', vencimiento: '' })
   const [modal, setModal] = useState(null)
+  const [aviso, setAviso] = useState(null)
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
 
   const handleConfirmar = async () => {
     if (!form.nombre || !form.codigo || !form.cantidad) { setModal('errorCampos'); return }
 
-    const { data: productos } = await supabase.from('productos').select('id,stock').eq('codigo_sku', form.codigo)
-    if (!productos?.length) { setModal('errorCampos'); return }
+    const cant = parseInt(form.cantidad)
+    if (!Number.isFinite(cant) || cant < 1) {
+      setAviso('La cantidad debe ser un numero entero de 1 o mas.')
+      return
+    }
+
+    const { data: productos, error: errProd } = await supabase
+      .from('productos').select('id,stock').eq('codigo_sku', form.codigo)
+    if (errProd) { setAviso(mensajeError(errProd, 'buscar el producto')); return }
+    if (!productos?.length) {
+      setAviso(`El codigo ${form.codigo} no existe en el inventario.`)
+      return
+    }
     const prod = productos[0]
 
-    await supabase.from('productos').update({ stock: prod.stock + parseInt(form.cantidad) }).eq('id', prod.id)
+    // movimientos_inventario.usuario_id es NOT NULL con FK a usuarios(id).
+    // Antes estaba fijo en 1 y el movimiento fallaba en silencio.
+    const usuarioId = await usuarioIdValido()
+    if (usuarioId == null) { setAviso(MENSAJE_SIN_USUARIO); return }
+
+    const { error: errStock } = await supabase
+      .from('productos').update({ stock: prod.stock + cant }).eq('id', prod.id)
+    if (errStock) { setAviso(mensajeError(errStock, 'sumar el stock')); return }
 
     if (form.vencimiento) {
       await supabase.from('lotes').insert({
@@ -26,17 +47,22 @@ export default function RegistrarEntrada() {
         codigo_lote: `LOTE-${Date.now()}`,
         fecha_entrada: new Date().toISOString().split('T')[0],
         fecha_vencimiento: form.vencimiento,
-        cantidad: parseInt(form.cantidad),
+        cantidad: cant,
       })
     }
 
-    await supabase.from('movimientos_inventario').insert({
+    const { error: errMov } = await supabase.from('movimientos_inventario').insert({
       producto_id: prod.id,
-      usuario_id: 1, 
+      usuario_id: usuarioId,
       tipo_movimiento: 'ENTRADA',
-      cantidad: parseInt(form.cantidad),
-      referencia: form.proveedor,
+      cantidad: cant,
+      referencia: form.proveedor || null,
     })
+    if (errMov) {
+      setAviso(mensajeError(errMov, 'registrar el movimiento de inventario') +
+        ' El stock si se sumo correctamente.')
+      return
+    }
 
     setModal('ok')
   }
@@ -78,8 +104,10 @@ export default function RegistrarEntrada() {
 
       <Modal show={modal === 'ok'} message="Se ha registrado con éxito la entrada del producto."
         actions={<button className="btn btn-gold" onClick={() => navigate('/inventario/asignar-ubicacion')}>✔ Aceptar</button>}/>
-      <Modal show={modal === 'errorCampos'} message="Debe completar todos los campos antes de confirmar."
+      <Modal show={modal === 'errorCampos'} message="Debe completar el nombre, el código y la cantidad antes de confirmar."
         actions={<button className="btn btn-gold" onClick={() => setModal(null)}>✔ Aceptar</button>}/>
+      <Modal show={!!aviso} message={aviso}
+        actions={<button className="btn btn-gold" onClick={() => setAviso(null)}>✔ Entendido</button>}/>
     </Layout>
   )
 }
