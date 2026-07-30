@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import Layout from '../../components/Layout.jsx'
 import Modal from '../../components/Modal.jsx'
 import { supabase } from '../../lib/supabase.js'
+import { mensajeError } from '../../lib/errores.js'
+import { usuarioIdValido } from '../../lib/sesion.js'
 
 export default function InformeBaja() {
   const navigate = useNavigate()
@@ -53,24 +55,52 @@ export default function InformeBaja() {
       alert("Por favor, introduce el código del producto y la cantidad.")
       return
     }
-    const { data: productos } = await supabase.from('productos').select('id,stock').eq('codigo_sku', form.codigo)
+    const cant = parseInt(form.cantidad)
+    if (!Number.isFinite(cant) || cant < 1) {
+      alert("La cantidad debe ser un número entero de 1 o más.")
+      return
+    }
+
+    const { data: productos, error: errProd } = await supabase
+      .from('productos').select('id,stock').eq('codigo_sku', form.codigo)
+    if (errProd) { alert(mensajeError(errProd, 'buscar el producto')); return }
     if (!productos?.length) {
       alert("El código de producto no existe.")
       return
     }
 
     const prod = productos[0]
-    const cant = parseInt(form.cantidad)
 
-    if (prod.stock >= cant) {
-      await supabase.from('productos').update({ stock: prod.stock - cant }).eq('id', prod.id)
-      await supabase.from('informe_baja').insert({
-        producto_id: prod.id, usuario_id: 1, cantidad: cant, observaciones: form.motivo, estado: 'activo'
-      })
-      setModal('crear-ok')
-    } else {
+    if (prod.stock < cant) {
       alert("La cantidad ingresada supera al stock actual.")
+      return
     }
+
+    // Antes se descontaba el stock PRIMERO y se insertaba el informe despues
+    // sin comprobar el error: el inventario podia quedar rebajado sin informe.
+    // Ahora se crea el informe y solo entonces se toca el stock.
+    const usuarioId = await usuarioIdValido()
+    const { data: informe, error: errIns } = await supabase.from('informe_baja').insert({
+      producto_id: prod.id,
+      usuario_id: usuarioId ?? undefined,
+      cantidad: cant,
+      observaciones: form.motivo,
+      estado: 'activo'
+    }).select('id').single()
+
+    if (errIns || !informe) { alert(mensajeError(errIns, 'guardar el informe de baja')); return }
+
+    const { error: errStock } = await supabase
+      .from('productos').update({ stock: prod.stock - cant }).eq('id', prod.id)
+
+    if (errStock) {
+      await supabase.from('informe_baja').delete().eq('id', informe.id)
+      alert(mensajeError(errStock, 'descontar el stock') +
+        ' El informe se canceló para que el inventario no quede descuadrado.')
+      return
+    }
+
+    setModal('crear-ok')
   }
 
   const irAEditar = (baja) => {
@@ -89,19 +119,46 @@ export default function InformeBaja() {
     const cantNueva = parseInt(form.cantidad)
     if (!form.motivo || isNaN(cantNueva)) return
 
-    const { data: baja } = await supabase.from('informe_baja').select('producto_id').eq('id', editandoId).single()
-    const { data: prod } = await supabase.from('productos').select('stock').eq('id', baja.producto_id).single()
-    
-    if (prod) {
-      const stockRecompuesto = prod.stock + cantidadOriginal
-      if (stockRecompuesto < cantNueva) {
-        alert("No hay suficiente stock disponible.")
-        return
-      }
-      await supabase.from('productos').update({ stock: stockRecompuesto - cantNueva }).eq('id', baja.producto_id)
-      await supabase.from('informe_baja').update({ cantidad: cantNueva, observaciones: form.motivo }).eq('id', editandoId)
-      setModal('editar-ok')
+    // Antes se hacia  baja.producto_id  sin comprobar que `baja` existiera:
+    // si la consulta fallaba, `baja` era null y la pagina se caia con
+    // "Cannot read properties of null" (pantalla en blanco).
+    const { data: baja, error: errBaja } = await supabase
+      .from('informe_baja').select('producto_id').eq('id', editandoId).maybeSingle()
+    if (errBaja) { alert(mensajeError(errBaja, 'buscar el informe')); return }
+    if (!baja?.producto_id) {
+      alert("No se encontró el informe de baja o no tiene producto asociado.")
+      return
     }
+
+    const { data: prod, error: errProd } = await supabase
+      .from('productos').select('stock').eq('id', baja.producto_id).maybeSingle()
+    if (errProd) { alert(mensajeError(errProd, 'consultar el stock')); return }
+    // Antes, si esto era falsy la funcion terminaba en silencio y el boton
+    // "Guardar cambios" no hacia nada sin explicar por que.
+    if (!prod) {
+      alert("El producto de este informe ya no existe en inventario, no se puede recalcular el stock.")
+      return
+    }
+
+    const stockRecompuesto = prod.stock + cantidadOriginal
+    if (stockRecompuesto < cantNueva) {
+      alert("No hay suficiente stock disponible.")
+      return
+    }
+
+    const { error: errUpd } = await supabase.from('informe_baja')
+      .update({ cantidad: cantNueva, observaciones: form.motivo }).eq('id', editandoId)
+    if (errUpd) { alert(mensajeError(errUpd, 'actualizar el informe')); return }
+
+    const { error: errStock } = await supabase.from('productos')
+      .update({ stock: stockRecompuesto - cantNueva }).eq('id', baja.producto_id)
+    if (errStock) {
+      await supabase.from('informe_baja').update({ cantidad: cantidadOriginal }).eq('id', editandoId)
+      alert(mensajeError(errStock, 'recalcular el stock') + ' Se restauró la cantidad anterior.')
+      return
+    }
+
+    setModal('editar-ok')
   }
 
   const handleMoverAPapelera = async (bajaId) => {
@@ -115,16 +172,29 @@ export default function InformeBaja() {
     const confirmar = window.confirm(`¿Deseas reponer las ${cantidad} unidades al producto "${nombre}" y restaurar este informe?`)
     if (!confirmar) return
 
-    const { data: prod } = await supabase.from('productos').select('stock').eq('id', productoId).single()
-    if (prod) {
-      await supabase.from('productos').update({ stock: prod.stock + cantidad }).eq('id', productoId)
-      await supabase.from('informe_baja').update({ estado: 'activo' }).eq('id', bajaId)
-      
-      alert("¡Stock repuesto con éxito e informe restaurado en el historial!")
-      cargarBajas()
-    } else {
+    const { data: prod, error: errProd } = await supabase
+      .from('productos').select('stock').eq('id', productoId).maybeSingle()
+    if (errProd) { alert(mensajeError(errProd, 'consultar el producto')); return }
+    if (!prod) {
       alert("No se pudo encontrar el producto original para reponer las unidades.")
+      return
     }
+
+    const { error: errStock } = await supabase
+      .from('productos').update({ stock: prod.stock + cantidad }).eq('id', productoId)
+    if (errStock) { alert(mensajeError(errStock, 'reponer el stock')); return }
+
+    const { error: errBaja } = await supabase
+      .from('informe_baja').update({ estado: 'activo' }).eq('id', bajaId)
+    if (errBaja) {
+      // Deshacemos la reposicion para no inflar el inventario.
+      await supabase.from('productos').update({ stock: prod.stock }).eq('id', productoId)
+      alert(mensajeError(errBaja, 'restaurar el informe') + ' Se deshizo la reposición de stock.')
+      return
+    }
+
+    alert("¡Stock repuesto con éxito e informe restaurado en el historial!")
+    cargarBajas()
   }
 
   const handleBorrarDefinitivo = async (bajaId) => {

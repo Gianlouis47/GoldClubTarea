@@ -2,36 +2,67 @@ import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Layout from '../../components/Layout.jsx'
 import { supabase } from '../../lib/supabase.js'
+import { mensajeError } from '../../lib/errores.js'
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({ total: 0, stockPct: 78, vencePct: 12 })
+  // Ojo: estos valores arrancan en 0, no en 78/12. Antes eran datos de ejemplo
+  // que se quedaban en pantalla cuando la carga fallaba y parecian reales.
+  const [stats, setStats] = useState({ total: 0, stockPct: 0, vencePct: 0 })
   const [alertas, setAlertas] = useState([])
   const [ultima, setUltima] = useState('')
+  const [errorCarga, setErrorCarga] = useState(null)
 
   useEffect(() => {
     const loadStats = async () => {
-      // Total de productos
-      const { count } = await supabase.from('productos').select('*', { count: 'exact', head: true })
-      // Productos con stock bajo
-      const { data: bajos } = await supabase.from('productos').select('id').lt('stock', supabase.raw('stock_minimo'))
-      // Lotes próximos a vencer (30 días)
+      // BUG que habia aqui: se usaba
+      //     .lt('stock', supabase.raw('stock_minimo'))
+      // pero supabase.raw() NO EXISTE en supabase-js v2, asi que la funcion
+      // lanzaba "supabase.raw is not a function", el .catch(() => {}) se lo
+      // tragaba y el dashboard se quedaba mostrando el 78% y el 12% de
+      // ejemplo que estaban puestos a mano en el useState.
+      //
+      // PostgREST tampoco permite comparar dos columnas entre si, asi que se
+      // traen las dos columnas y se comparan en JavaScript.
+      const { data: productos, error: errProd } = await supabase
+        .from('productos').select('id, stock, stock_minimo').eq('activo', true)
+      if (errProd) throw errProd
+
+      const total = productos?.length || 0
+      const bajos = (productos || []).filter(p => (p.stock ?? 0) < (p.stock_minimo ?? 0))
+
+      // Lotes que vencen en los proximos 30 dias (no los ya vencidos).
+      const hoy = new Date()
       const fecha30 = new Date(); fecha30.setDate(fecha30.getDate() + 30)
-      const { data: lotesPV } = await supabase.from('lotes').select('id').lte('fecha_vencimiento', fecha30.toISOString().split('T')[0])
+      const iso = (d) => d.toISOString().split('T')[0]
+
+      const { data: lotes, error: errLotes } = await supabase
+        .from('lotes').select('id, fecha_vencimiento').not('fecha_vencimiento', 'is', null)
+      if (errLotes) throw errLotes
+
+      const totalLotes = lotes?.length || 0
+      const lotesPV = (lotes || []).filter(l =>
+        l.fecha_vencimiento >= iso(hoy) && l.fecha_vencimiento <= iso(fecha30)
+      )
+      const vencidos = (lotes || []).filter(l => l.fecha_vencimiento < iso(hoy))
 
       setStats({
-        total: count || 0,
-        stockPct: count ? Math.round(((count - (bajos?.length || 0)) / count) * 100) : 78,
-        vencePct: count ? Math.round(((lotesPV?.length || 0) / Math.max(count, 1)) * 100) : 12,
+        total,
+        // Porcentaje de productos con stock sano.
+        stockPct: total ? Math.round(((total - bajos.length) / total) * 100) : 0,
+        // Antes se dividian lotes entre productos, que son cosas distintas.
+        vencePct: totalLotes ? Math.round((lotesPV.length / totalLotes) * 100) : 0,
       })
       setUltima(new Date().toLocaleString('es-DO'))
 
-      // Alertas
       const alertasData = []
-      if (bajos?.length) alertasData.push({ tipo: 'green', msg: `Nivel mínimo: ${bajos.length} producto(s) por debajo del stock mínimo.` })
-      if (lotesPV?.length) alertasData.push({ tipo: 'red', msg: `Próximos a vencer: ${lotesPV.length} lote(s) en los próximos 30 días.` })
+      if (bajos.length) alertasData.push({ tipo: 'red', msg: `Nivel mínimo: ${bajos.length} producto(s) por debajo del stock mínimo.` })
+      if (lotesPV.length) alertasData.push({ tipo: 'red', msg: `Próximos a vencer: ${lotesPV.length} lote(s) en los próximos 30 días.` })
+      if (vencidos.length) alertasData.push({ tipo: 'red', msg: `Ya vencidos: ${vencidos.length} lote(s). Revisa Informe de baja.` })
       setAlertas(alertasData)
     }
-    loadStats().catch(() => {})
+
+    // Un fallo silencioso es peor que una caída: se avisa en pantalla.
+    loadStats().catch((e) => setErrorCarga(mensajeError(e, 'cargar los datos del panel')))
   }, [])
 
   return (
@@ -80,7 +111,13 @@ export default function Dashboard() {
 
           <div className="card" style={{gridColumn:'1 / -1'}}>
             <div style={{fontWeight:600,fontSize:14,marginBottom:12}}>Alertas</div>
-            {alertas.length === 0 && (
+            {errorCarga && (
+              <div className="alert-item" style={{border:'none'}}>
+                <div className="alert-dot" style={{background:'var(--danger)'}}></div>
+                <span>{errorCarga}</span>
+              </div>
+            )}
+            {!errorCarga && alertas.length === 0 && (
               <div className="alert-item" style={{border:'none'}}>
                 <div className="alert-dot dot-green"></div>
                 <span>Sin alertas activas.</span>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import Layout from '../../components/Layout.jsx'
 import Modal from '../../components/Modal.jsx'
 import { supabase } from '../../lib/supabase.js'
+import { mensajeError } from '../../lib/errores.js'
 
 export default function ConsultarMovimientos() {
   const hoy = new Date().toISOString().split('T')[0]
@@ -11,18 +12,37 @@ export default function ConsultarMovimientos() {
   const [hasta, setHasta] = useState(hoy)
   const [movimientos, setMovimientos] = useState([])
   const [modal, setModal] = useState(null)
+  const [cargandoMov, setCargandoMov] = useState(true)
+  const [errorMov, setErrorMov] = useState(null)
+
+  // BUG que habia aqui: el tipo se calculaba con
+  //     tipo.toUpperCase().replace('S','')
+  // y replace() solo cambia la PRIMERA coincidencia, asi que:
+  //   'Entradas' -> 'ENTRADA'  (bien, por casualidad)
+  //   'Salidas'  -> 'ALIDAS'   (mal: quitaba la S del principio)
+  // Resultado: filtrar por "Salidas" no devolvia nunca nada.
+  const TIPO_BD = { Entradas: 'ENTRADA', Salidas: 'SALIDA' }
 
   const cargar = async () => {
+    setCargandoMov(true)
     let q = supabase.from('movimientos_inventario')
       .select('id, tipo_movimiento, cantidad, fecha, referencia, productos(nombre,codigo_sku), usuarios(nombre,apellido)')
       .gte('fecha', desde)
       .lte('fecha', hasta + 'T23:59:59')
       .order('fecha', { ascending: false })
 
-    if (tipo !== 'Todos') q = q.eq('tipo_movimiento', tipo.toUpperCase().replace('S',''))
-    const { data } = await q
-    if (!data?.length) { setModal('sinMovimientos'); return }
-    setMovimientos(data)
+    if (tipo !== 'Todos' && TIPO_BD[tipo]) q = q.eq('tipo_movimiento', TIPO_BD[tipo])
+
+    const { data, error } = await q
+    setCargandoMov(false)
+
+    if (error) { setMovimientos([]); setErrorMov(mensajeError(error, 'consultar los movimientos')); return }
+
+    setErrorMov(null)
+    // Antes se hacia return sin vaciar la lista, asi que quedaban en pantalla
+    // los movimientos de la busqueda anterior junto al aviso de "sin datos".
+    setMovimientos(data || [])
+    if (!data?.length) setModal('sinMovimientos')
   }
 
   useEffect(() => { cargar() }, [])
@@ -77,6 +97,17 @@ export default function ConsultarMovimientos() {
               </tr>
             </thead>
             <tbody>
+              {cargandoMov && (
+                <tr><td colSpan="6" style={{padding:20,textAlign:'center'}} className="text-muted">Cargando movimientos...</td></tr>
+              )}
+              {!cargandoMov && errorMov && (
+                <tr><td colSpan="6" style={{padding:20,textAlign:'center',color:'var(--danger)'}}>{errorMov}</td></tr>
+              )}
+              {!cargandoMov && !errorMov && movimientos.length === 0 && (
+                <tr><td colSpan="6" style={{padding:20,textAlign:'center'}} className="text-muted">
+                  No hay movimientos entre esas fechas para el tipo seleccionado.
+                </td></tr>
+              )}
               {movimientos.map((m, i) => (
                 <tr key={m.id} style={{borderBottom: i < movimientos.length - 1 ? '1px solid #3a3a3a' : 'none'}}>
                   <td style={{padding:10}}>{new Date(m.fecha).toLocaleDateString('es-DO')}</td>
