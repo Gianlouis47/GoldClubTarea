@@ -377,7 +377,8 @@ export default function ReporteIncidentes() {
               <div className="section-heading mt-4">Detalles de autoria</div>
               <div className="form-group mb-4">
                 <label>Creado por:</label>
-                <input className="form-control" type="text" value={form.creadoPor} readOnly />
+                <input className="form-control" type="text" placeholder="Ej: Juan Perez"
+                  value={form.creadoPor} onChange={set('creadoPor')} />
               </div>
 
               <div className="text-center gap-2 d-flex justify-content-center">
