@@ -94,6 +94,13 @@ export default function OrdenPreparacion() {
     if (prod && cant > prod.cantidad_pedida) {
       return `La orden ${form.numOrden} solo pidio ${prod.cantidad_pedida} unidad(es) de ${prod.nombre}. No puedes preparar ${cant}.`
     }
+    // La orden de compra debe estar RECIBIDA: si sigue pendiente el producto
+    // todavia no sumo al stock, y no tiene sentido "preparar" algo que no esta
+    // fisicamente en el almacen.
+    const oc = ordenesCompra.find(o => o.numero_orden === form.numOrden)
+    if (oc && oc.estado !== 'recibida') {
+      return `La orden ${form.numOrden} aun esta ${oc.estado} (no recibida). Ese producto todavia no afecta el stock, primero debe recibirse en Ventas y Compras -> Recepcion de productos.`
+    }
     if (!form.destino.trim()) return 'Indica el destino del pedido.'
     return null
   }
@@ -193,6 +200,7 @@ export default function OrdenPreparacion() {
   })
 
   const productoElegido = productosOrden.find(p => p.codigo_sku === form.codigo)
+  const ordenCompraSel = ordenesCompra.find(o => o.numero_orden === form.numOrden)
 
   return (
     <Layout>
@@ -310,12 +318,20 @@ export default function OrdenPreparacion() {
                     No hay ordenes de compra registradas. Crea una en Ventas y Compras &rarr; Orden de compra.
                   </small>
                 )}
+                {ordenCompraSel && (
+                  <small className={ordenCompraSel.estado === 'recibida' ? 'text-success' : 'text-warning'}>
+                    Estado de recepcion: {ordenCompraSel.estado === 'recibida'
+                      ? 'Recibida (ya afecta el stock).'
+                      : 'Pendiente (todavia NO afecta el stock, no se puede preparar).'}
+                  </small>
+                )}
               </div>
 
               <div className="form-group mb-3">
                 <label>Producto de la orden:</label>
                 <select className="form-control" value={form.codigo}
-                  onChange={set('codigo')} disabled={!form.numOrden || productosOrden.length === 0}>
+                  onChange={set('codigo')}
+                  disabled={!form.numOrden || productosOrden.length === 0 || ordenCompraSel?.estado !== 'recibida'}>
                   <option value="">
                     {form.numOrden ? '-- Selecciona un producto --' : '-- Primero elige la orden --'}
                   </option>
