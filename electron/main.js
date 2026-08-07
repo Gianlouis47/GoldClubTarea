@@ -22,6 +22,14 @@ import { runPlan, signInWithPassword } from '../src/lib/local/engine.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+// En algunas PCs con Windows (tarjetas graficas integradas viejas, maquinas
+// virtuales, drivers desactualizados) Electron/Chromium se queda con la
+// ventana en negro al usar aceleracion por hardware para dibujar. Es un
+// problema conocido de Electron, no de esta app; desactivarla es la
+// solucion estandar y no se nota a simple vista en una app de formularios
+// y tablas como esta (no hay animaciones ni graficos pesados).
+app.disableHardwareAcceleration()
+
 // Con VITE_DEV_SERVER_URL definido (ver package.json -> script "electron:dev")
 // la ventana carga el dev server de Vite (hot reload); si no, carga el build
 // estatico generado por `npm run build` (dist/index.html).
@@ -56,6 +64,7 @@ function crearVentana() {
     height: 800,
     backgroundColor: '#1a1a1a',
     autoHideMenuBar: true,
+    show: false, // se muestra recien en 'ready-to-show', para no ver un frame en negro mientras carga
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -63,6 +72,8 @@ function crearVentana() {
       sandbox: false, // requerido para poder usar un preload ESM (ver preload.js)
     },
   })
+
+  win.once('ready-to-show', () => win.show())
 
   if (DEV_SERVER_URL) {
     win.loadURL(DEV_SERVER_URL)
