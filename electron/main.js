@@ -16,11 +16,38 @@
 
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'node:path'
+import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { openLocalDatabase } from '../src/lib/local/store.js'
 import { runPlan, signInWithPassword } from '../src/lib/local/engine.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// =========================================
+// Registro de diagnostico (temporal, para investigar la pantalla en negro
+// reportada en Windows: en el sandbox de desarrollo la app renderiza bien
+// en todos los escenarios probados, asi que hace falta ver el error real
+// que ocurre en la maquina donde SI falla). Se guarda en un archivo de
+// texto plano en la carpeta de datos de la app para poder mandarlo sin
+// depender de que la ventana muestre algo.
+// =========================================
+const LOG_PATH = path.join(app.getPath('userData'), 'diagnostico.log')
+function log(mensaje) {
+  const linea = `[${new Date().toISOString()}] ${mensaje}\n`
+  console.log(linea.trim())
+  try {
+    fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true })
+    fs.appendFileSync(LOG_PATH, linea)
+  } catch (e) {
+    console.error('[Gold Club] No se pudo escribir el log de diagnostico:', e)
+  }
+}
+
+log(`=== Gold Club iniciando === log en: ${LOG_PATH}`)
+log(`Electron ${process.versions.electron} / Chrome ${process.versions.chrome} / Node ${process.versions.node} / plataforma ${process.platform} ${process.arch}`)
+
+process.on('uncaughtException', (err) => log(`[uncaughtException] ${err?.stack || err}`))
+process.on('unhandledRejection', (err) => log(`[unhandledRejection] ${err?.stack || err}`))
 
 // En algunas PCs con Windows (tarjetas graficas integradas viejas, maquinas
 // virtuales, drivers desactualizados) Electron/Chromium se queda con la
@@ -39,8 +66,9 @@ let dbHandle = null
 
 async function iniciarBaseLocal() {
   const dbFilePath = path.join(app.getPath('userData'), 'goldclub.sqlite')
+  log(`Abriendo base de datos local en ${dbFilePath} ...`)
   dbHandle = await openLocalDatabase(dbFilePath)
-  console.log('[Gold Club] Base de datos local:', dbHandle.filePath)
+  log('Base de datos local lista.')
 }
 
 function registrarCanalesIpc() {
@@ -59,6 +87,7 @@ function registrarCanalesIpc() {
 }
 
 function crearVentana() {
+  log('Creando ventana...')
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -73,25 +102,47 @@ function crearVentana() {
     },
   })
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => { log('ready-to-show: mostrando ventana.'); win.show() })
+  win.webContents.on('console-message', (e) => log(`[renderer console] nivel=${e.level} ${e.sourceId}:${e.lineNumber} -> ${e.message}`))
+  win.webContents.on('did-fail-load', (e, errorCode, errorDescription, validatedURL) => log(`[did-fail-load] codigo=${errorCode} desc=${errorDescription} url=${validatedURL}`))
+  win.webContents.on('did-finish-load', () => log('did-finish-load: la pagina termino de cargar.'))
+  win.webContents.on('preload-error', (e, preloadPath, error) => log(`[preload-error] ${preloadPath} -> ${error?.stack || error}`))
+  win.webContents.on('render-process-gone', (e, details) => log(`[render-process-gone] ${JSON.stringify(details)}`))
+  win.webContents.on('unresponsive', () => log('[unresponsive] la ventana dejo de responder.'))
+  win.on('unresponsive', () => log('[window unresponsive]'))
+
+  // DIAGNOSTICO TEMPORAL: se fuerzan las DevTools tambien en produccion para
+  // poder ver el error real en la maquina donde la pantalla queda en negro.
+  // Se debe quitar esta linea (dejando el bloque `if (DEV_SERVER_URL)` de
+  // abajo tal cual) una vez resuelto el problema, antes de la entrega final.
+  win.webContents.openDevTools({ mode: 'detach' })
 
   if (DEV_SERVER_URL) {
+    log(`Cargando dev server: ${DEV_SERVER_URL}`)
     win.loadURL(DEV_SERVER_URL)
-    win.webContents.openDevTools({ mode: 'detach' })
   } else {
-    win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
+    const distIndex = path.join(__dirname, '..', 'dist', 'index.html')
+    log(`Cargando build estatico: ${distIndex} (existe: ${fs.existsSync(distIndex)})`)
+    win.loadFile(distIndex)
+      .then(() => log('loadFile resuelto sin error.'))
+      .catch((err) => log(`[loadFile error] ${err?.stack || err}`))
   }
 }
 
 app.whenReady().then(async () => {
-  await iniciarBaseLocal()
-  registrarCanalesIpc()
-  crearVentana()
+  log('app.whenReady().')
+  try {
+    await iniciarBaseLocal()
+    registrarCanalesIpc()
+    crearVentana()
+  } catch (err) {
+    log(`[error en el arranque] ${err?.stack || err}`)
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) crearVentana()
   })
-})
+}).catch((err) => log(`[whenReady rechazado] ${err?.stack || err}`))
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
