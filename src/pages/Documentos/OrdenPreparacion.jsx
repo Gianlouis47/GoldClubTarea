@@ -5,7 +5,7 @@ import Modal from '../../components/Modal.jsx'
 import { supabase, supabaseConfigurado, MENSAJE_SIN_CONFIGURAR } from '../../lib/supabase.js'
 import { mensajeError } from '../../lib/errores.js'
 import { nombreUsuarioActual } from '../../lib/sesion.js'
-import { cargarOrdenesCompra, productosDeOrden } from '../../lib/ordenes.js'
+import { cargarOrdenesCompra } from '../../lib/ordenes.js'
 
 export default function OrdenPreparacion() {
   const navigate = useNavigate()
@@ -18,22 +18,26 @@ export default function OrdenPreparacion() {
   const [busqueda, setBusqueda] = useState('')
   const [guardando, setGuardando] = useState(false)
 
-  // Ordenes de compra reales + productos de la orden elegida.
-  // Antes el numero de orden y el codigo de producto eran texto libre, asi que
-  // la orden de preparacion podia apuntar a una orden que no existia y no se
-  // podia cruzar con la nota de despacho ni con el reporte de incidentes.
+  // El producto a preparar se elige del INVENTARIO real (tabla productos), no
+  // de una orden de compra puntual. Preparar un producto significa alistarlo
+  // para su entrega, y eso solo tiene sentido si ya esta fisicamente en el
+  // almacen (ya fue recibido); por eso el campo "recibido" no es una casilla
+  // que alguien marca a mano, sino un hecho: si esta en el inventario, fue
+  // recibido. La orden de compra queda como referencia OPCIONAL, para
+  // trazabilidad, pero ya no bloquea ni filtra nada.
+  const [productos, setProductos] = useState([])
   const [ordenesCompra, setOrdenesCompra] = useState([])
-  const [productosOrden, setProductosOrden] = useState([])
 
   const [form, setForm] = useState({
-    numOrden: '', codigo: '', cantidad: '', destino: '',
+    codigo: '', cantidad: '', destino: '', numOrden: '',
     creadoPor: nombreUsuarioActual(),
   })
   const [editandoId, setEditandoId] = useState(null)
 
   useEffect(() => {
     cargarOrdenes()
-    cargarCatalogoOrdenes()
+    cargarProductos()
+    cargarCatalogoOrdenesCompra()
   }, [])
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
@@ -51,55 +55,43 @@ export default function OrdenPreparacion() {
     setCargando(false)
   }
 
-  const cargarCatalogoOrdenes = async () => {
+  // Productos ya recibidos en inventario (con stock disponible): son los
+  // unicos que realmente se pueden preparar para despachar.
+  const cargarProductos = async () => {
+    if (!supabaseConfigurado) return
+    const { data, error } = await supabase
+      .from('productos')
+      .select('id, codigo_sku, nombre, stock')
+      .gt('stock', 0)
+      .order('nombre', { ascending: true })
+    if (error) { setAviso(mensajeError(error, 'cargar el inventario')); return }
+    setProductos(data || [])
+  }
+
+  // Solo para el campo de referencia opcional "Orden de compra relacionada".
+  const cargarCatalogoOrdenesCompra = async () => {
     if (!supabaseConfigurado) return
     const { ordenes: oc, error } = await cargarOrdenesCompra()
-    if (error) { setAviso(mensajeError(error, 'cargar las ordenes de compra')); return }
+    if (error) return
     setOrdenesCompra(oc)
   }
 
-  // Al elegir una orden de compra se cargan SUS productos.
-  const elegirOrdenCompra = async (numero) => {
-    setForm(f => ({ ...f, numOrden: numero, codigo: '', cantidad: '' }))
-    setProductosOrden([])
-    if (!numero) return
-
-    const oc = ordenesCompra.find(o => o.numero_orden === numero)
-    if (!oc) return
-
-    const { productos, error } = await productosDeOrden(oc.id)
-    if (error) { setAviso(mensajeError(error, 'cargar los productos de la orden')); return }
-    setProductosOrden(productos)
-    if (productos.length === 0) {
-      setAviso(`La orden ${numero} no tiene productos registrados. Revisala en Ventas y Compras.`)
-    }
-  }
-
   const irACrear = () => {
-    setForm({ numOrden: '', codigo: '', cantidad: '', destino: '', creadoPor: nombreUsuarioActual() })
-    setProductosOrden([])
+    setForm({ codigo: '', cantidad: '', destino: '', numOrden: '', creadoPor: nombreUsuarioActual() })
     setEditandoId(null)
     setVista('crear')
   }
 
   /** Validacion comun a crear y editar. Devuelve null si todo esta bien. */
   const validar = () => {
-    if (!form.numOrden) return 'Selecciona el numero de la orden de compra.'
     if (!form.codigo) return 'Selecciona el producto a preparar.'
     const cant = parseInt(form.cantidad)
     if (!Number.isFinite(cant) || cant < 1) {
-      return 'La cantidad a despachar debe ser un numero entero de 1 o mas.'
+      return 'La cantidad a preparar debe ser un numero entero de 1 o mas.'
     }
-    const prod = productosOrden.find(p => p.codigo_sku === form.codigo)
-    if (prod && cant > prod.cantidad_pedida) {
-      return `La orden ${form.numOrden} solo pidio ${prod.cantidad_pedida} unidad(es) de ${prod.nombre}. No puedes preparar ${cant}.`
-    }
-    // La orden de compra debe estar RECIBIDA: si sigue pendiente el producto
-    // todavia no sumo al stock, y no tiene sentido "preparar" algo que no esta
-    // fisicamente en el almacen.
-    const oc = ordenesCompra.find(o => o.numero_orden === form.numOrden)
-    if (oc && oc.estado !== 'recibida') {
-      return `La orden ${form.numOrden} aun esta ${oc.estado} (no recibida). Ese producto todavia no afecta el stock, primero debe recibirse en Ventas y Compras -> Recepcion de productos.`
+    const prod = productos.find(p => p.codigo_sku === form.codigo)
+    if (prod && cant > prod.stock) {
+      return `Solo hay ${prod.stock} unidad(es) de ${prod.nombre} recibidas en inventario. No puedes preparar ${cant}.`
     }
     if (!form.destino.trim()) return 'Indica el destino del pedido.'
     return null
@@ -112,10 +104,11 @@ export default function OrdenPreparacion() {
 
     setGuardando(true)
     const { error: errIns } = await supabase.from('orden_preparacion').insert({
-      num_orden: form.numOrden,
       codigo: form.codigo,
       cantidad: parseInt(form.cantidad),
       destino: form.destino.trim(),
+      num_orden: form.numOrden || null,
+      recibido: true,
       creado_por: form.creadoPor,
       estado: 'activo'
     })
@@ -125,23 +118,15 @@ export default function OrdenPreparacion() {
     else setModal('crear-ok')
   }
 
-  const irAEditar = async (orden) => {
+  const irAEditar = (orden) => {
     setEditandoId(orden.id)
     setForm({
-      numOrden: orden.num_orden || '',
       codigo: orden.codigo || '',
       cantidad: orden.cantidad ?? '',
       destino: orden.destino || '',
+      numOrden: orden.num_orden || '',
       creadoPor: orden.creado_por || nombreUsuarioActual()
     })
-    // Cargamos los productos de esa orden para poder validar la cantidad.
-    const oc = ordenesCompra.find(o => o.numero_orden === orden.num_orden)
-    if (oc) {
-      const { productos } = await productosDeOrden(oc.id)
-      setProductosOrden(productos)
-    } else {
-      setProductosOrden([])
-    }
     setVista('editar')
   }
 
@@ -151,10 +136,10 @@ export default function OrdenPreparacion() {
 
     setGuardando(true)
     const { error: errUpd } = await supabase.from('orden_preparacion').update({
-      num_orden: form.numOrden,
       codigo: form.codigo,
       cantidad: parseInt(form.cantidad),
       destino: form.destino.trim(),
+      num_orden: form.numOrden || null,
       creado_por: form.creadoPor
     }).eq('id', editandoId)
     setGuardando(false)
@@ -186,6 +171,7 @@ export default function OrdenPreparacion() {
     setModal(null)
     setVista('lista')
     cargarOrdenes()
+    cargarProductos()
   }
 
   const activos = ordenes.filter(o => o.estado !== 'eliminado')
@@ -199,8 +185,7 @@ export default function OrdenPreparacion() {
            (o.creado_por || '').toLowerCase().includes(t)
   })
 
-  const productoElegido = productosOrden.find(p => p.codigo_sku === form.codigo)
-  const ordenCompraSel = ordenesCompra.find(o => o.numero_orden === form.numOrden)
+  const productoElegido = productos.find(p => p.codigo_sku === form.codigo)
 
   return (
     <Layout>
@@ -244,18 +229,19 @@ export default function OrdenPreparacion() {
               <table className="table table-dark table-striped align-middle" style={{ borderCollapse: 'separate', borderSpacing: '0 10px' }}>
                 <thead>
                   <tr>
-                    <th className="px-3" style={{ paddingLeft: '15px' }}>N&ordm; Orden</th>
-                    <th className="px-3">Cod. Producto</th>
+                    <th className="px-3" style={{ paddingLeft: '15px' }}>Cod. Producto</th>
+                    <th className="px-3">Recibido</th>
                     <th className="px-3">Cantidad</th>
                     <th className="px-3">Destino</th>
+                    <th className="px-3">Ref. Orden de compra</th>
                     <th className="text-center" style={{ width: '220px' }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {cargando ? (
-                    <tr><td colSpan="5" className="text-center text-muted py-4">Cargando datos...</td></tr>
+                    <tr><td colSpan="6" className="text-center text-muted py-4">Cargando datos...</td></tr>
                   ) : filtrados.length === 0 ? (
-                    <tr><td colSpan="5" className="text-center text-muted py-4">
+                    <tr><td colSpan="6" className="text-center text-muted py-4">
                       {busqueda
                         ? `Ninguna orden coincide con "${busqueda}".`
                         : vista === 'lista'
@@ -265,10 +251,15 @@ export default function OrdenPreparacion() {
                   ) : (
                     filtrados.map((o) => (
                       <tr key={o.id}>
-                        <td className="px-3" style={{ paddingLeft: '15px' }}><span className="text-gold">{o.num_orden || 'S/N'}</span></td>
-                        <td className="px-3"><code>{o.codigo}</code></td>
+                        <td className="px-3" style={{ paddingLeft: '15px' }}><code>{o.codigo}</code></td>
+                        <td className="px-3">
+                          {o.recibido !== false
+                            ? <span className="text-success">Si &#10004;</span>
+                            : <span className="text-warning">No</span>}
+                        </td>
                         <td className="px-3" style={{ fontWeight: 'bold' }}>{o.cantidad} uds.</td>
                         <td className="px-3">{o.destino} <br/> <small className="text-muted">Por: {o.creado_por}</small></td>
+                        <td className="px-3">{o.num_orden || <span className="text-muted">Sin referencia</span>}</td>
                         <td className="text-center">
                           <div className="d-flex gap-2 justify-content-center">
                             {vista === 'lista' ? (
@@ -303,63 +294,42 @@ export default function OrdenPreparacion() {
               </div>
 
               <div className="form-group mb-3">
-                <label>Numero de orden de compra:</label>
-                <select className="form-control" value={form.numOrden}
-                  onChange={e => elegirOrdenCompra(e.target.value)}>
-                  <option value="">-- Selecciona una orden de compra --</option>
-                  {ordenesCompra.map(o => (
-                    <option key={o.id} value={o.numero_orden}>
-                      {o.numero_orden} &mdash; {o.proveedores?.nombre_empresa || 'Sin proveedor'} ({o.estado})
-                    </option>
-                  ))}
-                </select>
-                {ordenesCompra.length === 0 && (
-                  <small className="text-muted">
-                    No hay ordenes de compra registradas. Crea una en Ventas y Compras &rarr; Orden de compra.
-                  </small>
-                )}
-                {ordenCompraSel && (
-                  <small className={ordenCompraSel.estado === 'recibida' ? 'text-success' : 'text-warning'}>
-                    Estado de recepcion: {ordenCompraSel.estado === 'recibida'
-                      ? 'Recibida (ya afecta el stock).'
-                      : 'Pendiente (todavia NO afecta el stock, no se puede preparar).'}
-                  </small>
-                )}
-              </div>
-
-              <div className="form-group mb-3">
-                <label>Producto de la orden:</label>
-                <select className="form-control" value={form.codigo}
-                  onChange={set('codigo')}
-                  disabled={!form.numOrden || productosOrden.length === 0 || ordenCompraSel?.estado !== 'recibida'}>
-                  <option value="">
-                    {form.numOrden ? '-- Selecciona un producto --' : '-- Primero elige la orden --'}
-                  </option>
-                  {productosOrden.map(p => (
+                <label>Producto a preparar (ya recibido en inventario):</label>
+                <select className="form-control" value={form.codigo} onChange={set('codigo')}>
+                  <option value="">-- Selecciona un producto --</option>
+                  {productos.map(p => (
                     <option key={p.codigo_sku} value={p.codigo_sku}>
-                      {p.codigo_sku} &mdash; {p.nombre} (pedidas: {p.cantidad_pedida})
+                      {p.codigo_sku} &mdash; {p.nombre} (stock: {p.stock})
                     </option>
                   ))}
                 </select>
+                {productos.length === 0 && (
+                  <small className="text-muted">
+                    No hay productos con stock disponible. Primero recibe una orden de compra en
+                    Ventas y Compras &rarr; Recepcion de productos.
+                  </small>
+                )}
+                {productoElegido && (
+                  <small className="text-success">
+                    Producto recibido &#10004; (hay {productoElegido.stock} uds. en inventario).
+                  </small>
+                )}
               </div>
 
               <div className="form-group mb-3">
-                <label>Cantidad a despachar:</label>
+                <label>Cantidad a preparar:</label>
                 <input
                   className="form-control"
                   type="number"
                   min="1"
                   step="1"
-                  max={productoElegido?.cantidad_pedida || undefined}
+                  max={productoElegido?.stock || undefined}
                   placeholder="Ej: 8"
                   value={form.cantidad}
                   onChange={set('cantidad')}
                 />
                 {productoElegido && (
-                  <small className="text-muted">
-                    Maximo segun la orden: {productoElegido.cantidad_pedida} uds.
-                    Stock actual en inventario: {productoElegido.stock} uds.
-                  </small>
+                  <small className="text-muted">Maximo disponible: {productoElegido.stock} uds.</small>
                 )}
               </div>
 
@@ -372,6 +342,21 @@ export default function OrdenPreparacion() {
                   value={form.destino}
                   onChange={set('destino')}
                 />
+              </div>
+
+              <div className="form-group mb-3">
+                <label>Orden de compra relacionada (opcional):</label>
+                <select className="form-control" value={form.numOrden} onChange={set('numOrden')}>
+                  <option value="">-- Sin referencia --</option>
+                  {ordenesCompra.map(o => (
+                    <option key={o.id} value={o.numero_orden}>
+                      {o.numero_orden} &mdash; {o.proveedores?.nombre_empresa || 'Sin proveedor'}
+                    </option>
+                  ))}
+                </select>
+                <small className="text-muted">
+                  Solo para trazabilidad. La orden de preparacion no depende de ninguna orden de compra.
+                </small>
               </div>
 
               <div className="section-heading mt-4">Detalles de autoria</div>
@@ -397,15 +382,15 @@ export default function OrdenPreparacion() {
 
             {vista === 'crear' && (
               <div>
-                <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14 }}>Ordenes de compra recientes:</div>
+                <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14 }}>Productos con stock disponible:</div>
                 <ul className="sidebar-list">
-                  {ordenesCompra.slice(0, 6).map(o => (
-                    <li key={o.id} onClick={() => elegirOrdenCompra(o.numero_orden)} style={{ cursor: 'pointer' }}>
-                      {o.numero_orden} <span className="sidebar-arrow">&#9654;</span>
+                  {productos.slice(0, 6).map(p => (
+                    <li key={p.codigo_sku} onClick={() => setForm(f => ({ ...f, codigo: p.codigo_sku }))} style={{ cursor: 'pointer' }}>
+                      {p.codigo_sku} &mdash; {p.nombre} <span className="sidebar-arrow">&#9654;</span>
                     </li>
                   ))}
-                  {ordenesCompra.length === 0 && (
-                    <li className="text-muted">Sin ordenes registradas</li>
+                  {productos.length === 0 && (
+                    <li className="text-muted">Sin productos recibidos en inventario</li>
                   )}
                 </ul>
               </div>

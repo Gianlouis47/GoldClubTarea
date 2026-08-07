@@ -317,6 +317,7 @@ CREATE TABLE public.orden_preparacion (
   codigo text,
   cantidad integer NOT NULL DEFAULT 0,
   destino text,
+  recibido boolean NOT NULL DEFAULT true,
   creado_por text DEFAULT 'Juan Pérez'::text,
   estado text DEFAULT 'activo'::text,
   created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
