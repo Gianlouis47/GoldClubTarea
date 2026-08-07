@@ -1,24 +1,4 @@
 import { createClient } from '@supabase/supabase-js'
-// El import de ipcClient.js es estatico (no dynamic import) a proposito:
-// solo usa `window.electronAPI` en tiempo de EJECUCION (dentro de las
-// funciones), nunca al cargar el modulo, asi que es seguro incluirlo en el
-// bundle web tambien -- en el navegador simplemente nunca se usa.
-import { localSupabaseClient } from './local/ipcClient.js'
-
-// =========================================
-// Version de escritorio (Electron) vs version web
-// =========================================
-// Empaquetada con Electron, la app corre SIN INTERNET y con los datos
-// guardados en un archivo SQLite local (ver src/lib/local/). electron/preload.js
-// expone `window.electronAPI.isElectron = true` solo dentro de esa ventana,
-// asi que sirve para elegir en tiempo de ejecucion que implementacion usar
-// sin tocar ninguna pantalla: todas siguen importando { supabase,
-// supabaseConfigurado, MENSAJE_SIN_CONFIGURAR } de este mismo archivo.
-//
-// La version web (navegador normal, `npm run dev` / `npm run build` sin
-// Electron) sigue hablando con Supabase exactamente igual que antes.
-// =========================================
-const esElectron = typeof window !== 'undefined' && !!window.electronAPI?.isElectron
 
 // Las credenciales NUNCA van en el repositorio (ver Guia Tecnica, seccion 5:
 // "Variables de entorno - ninguna credencial en el repositorio").
@@ -33,18 +13,15 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 const PLACEHOLDERS = ['https://TU_PROJECT.supabase.co', 'TU_ANON_KEY', '']
 
 /**
- * true cuando hay una base de datos utilizable: en Electron siempre (el
- * archivo SQLite local se crea solo la primera vez), en la version web solo
- * si hay credenciales reales de Supabase configuradas.
+ * true cuando hay credenciales reales configuradas.
  * Las pantallas lo usan para mostrar un aviso concreto en lugar de
  * "Ocurrio un error" (Guia Tecnica: "Errores visibles").
  */
 export const supabaseConfigurado =
-  esElectron ||
-  (!!SUPABASE_URL &&
-    !!SUPABASE_ANON_KEY &&
-    !PLACEHOLDERS.includes(SUPABASE_URL) &&
-    !PLACEHOLDERS.includes(SUPABASE_ANON_KEY))
+  !!SUPABASE_URL &&
+  !!SUPABASE_ANON_KEY &&
+  !PLACEHOLDERS.includes(SUPABASE_URL) &&
+  !PLACEHOLDERS.includes(SUPABASE_ANON_KEY)
 
 export const MENSAJE_SIN_CONFIGURAR =
   'La conexion con la base de datos no esta configurada. ' +
@@ -58,9 +35,7 @@ if (!supabaseConfigurado) {
 
 // Se crea el cliente igual (aunque falten credenciales) para que los imports
 // no revienten; las peticiones fallaran y el helper de errores lo explicara.
-const supabaseWeb = createClient(
+export const supabase = createClient(
   SUPABASE_URL || 'http://localhost:54321',
   SUPABASE_ANON_KEY || 'sin-configurar'
 )
-
-export const supabase = esElectron ? localSupabaseClient : supabaseWeb
