@@ -14,14 +14,38 @@
 //   4. Persistir la base a disco despues de cada escritura.
 // =========================================
 
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol, net } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { openLocalDatabase } from '../src/lib/local/store.js'
 import { runPlan, signInWithPassword } from '../src/lib/local/engine.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// =========================================
+// Protocolo propio "app://" para servir el build
+// =========================================
+// Cargar dist/index.html con loadFile() usa file://, y ahi la pagina resuelve
+// mal las rutas relativas de los assets: dentro del paquete (app.asar) la
+// direccion base queda en la raiz ("file:///" en Linux, "file:///C:/" en
+// Windows), asi que "./assets/x.js" termina apuntando a C:\assets\x.js, que
+// no existe -> el JS nunca se ejecuta y la ventana se ve en negro.
+//
+// Con un esquema propio registrado como "standard" las URLs se resuelven de
+// forma consistente en todos los sistemas operativos, y sirviendo los
+// archivos desde el disco (incluido el interior de app.asar) se evita por
+// completo esa diferencia entre plataformas.
+// =========================================
+const APP_SCHEME = 'app'
+const APP_ORIGIN = `${APP_SCHEME}://local`
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+  },
+])
 
 // =========================================
 // Registro de diagnostico (temporal, para investigar la pantalla en negro
@@ -84,6 +108,38 @@ function registrarCanalesIpc() {
   ipcMain.handle('db:auth', async (_event, credenciales) => {
     return signInWithPassword(dbHandle.db, credenciales)
   })
+
+  // DIAGNOSTICO TEMPORAL: errores de JavaScript reenviados desde preload.js.
+  ipcMain.on('diag:error', (_event, mensaje) => log(`[error en la pagina] ${mensaje}`))
+}
+
+/**
+ * Sirve los archivos de dist/ bajo app://local/... leyendolos del disco
+ * (funciona igual dentro de app.asar, que Electron trata como una carpeta).
+ */
+function registrarProtocoloApp() {
+  const raizDist = path.join(__dirname, '..', 'dist')
+
+  protocol.handle(APP_SCHEME, async (request) => {
+    const { pathname } = new URL(request.url)
+    const relativo = decodeURIComponent(pathname === '/' ? '/index.html' : pathname)
+
+    // Nunca servir nada fuera de dist/ (evita que una ruta con ".." escape).
+    const destino = path.normalize(path.join(raizDist, relativo))
+    if (!destino.startsWith(raizDist)) {
+      log(`[protocolo app] ruta rechazada fuera de dist: ${relativo}`)
+      return new Response('No encontrado', { status: 404 })
+    }
+
+    try {
+      return await net.fetch(pathToFileURL(destino).toString())
+    } catch (err) {
+      log(`[protocolo app] error sirviendo ${relativo}: ${err?.stack || err}`)
+      return new Response('No encontrado', { status: 404 })
+    }
+  })
+
+  log(`Protocolo ${APP_SCHEME}:// registrado, sirviendo desde ${raizDist}`)
 }
 
 function crearVentana() {
@@ -105,33 +161,52 @@ function crearVentana() {
   win.once('ready-to-show', () => { log('ready-to-show: mostrando ventana.'); win.show() })
   win.webContents.on('console-message', (e) => log(`[renderer console] nivel=${e.level} ${e.sourceId}:${e.lineNumber} -> ${e.message}`))
   win.webContents.on('did-fail-load', (e, errorCode, errorDescription, validatedURL) => log(`[did-fail-load] codigo=${errorCode} desc=${errorDescription} url=${validatedURL}`))
-  win.webContents.on('did-finish-load', () => log('did-finish-load: la pagina termino de cargar.'))
+  win.webContents.on('did-finish-load', async () => {
+    log('did-finish-load: la pagina termino de cargar.')
+    // Volcado del estado real del DOM: distingue "la pagina cargo pero React
+    // no monto nada" (pantalla en negro) de "React monto bien".
+    try {
+      const estado = await win.webContents.executeJavaScript(`(() => {
+        const root = document.getElementById('root')
+        const scripts = [...document.querySelectorAll('script')].map(s => s.src || '(inline)')
+        return JSON.stringify({
+          url: location.href,
+          titulo: document.title,
+          rootExiste: !!root,
+          rootLargo: root ? root.innerHTML.length : -1,
+          rootInicio: root ? root.innerHTML.slice(0, 120) : null,
+          scripts,
+          electronAPI: typeof window.electronAPI,
+          erroresCapturados: window.__erroresGoldClub || [],
+        })
+      })()`)
+      log(`[estado del DOM] ${estado}`)
+    } catch (err) {
+      log(`[error leyendo el DOM] ${err?.stack || err}`)
+    }
+  })
   win.webContents.on('preload-error', (e, preloadPath, error) => log(`[preload-error] ${preloadPath} -> ${error?.stack || error}`))
   win.webContents.on('render-process-gone', (e, details) => log(`[render-process-gone] ${JSON.stringify(details)}`))
   win.webContents.on('unresponsive', () => log('[unresponsive] la ventana dejo de responder.'))
   win.on('unresponsive', () => log('[window unresponsive]'))
 
-  // DIAGNOSTICO TEMPORAL: se fuerzan las DevTools tambien en produccion para
-  // poder ver el error real en la maquina donde la pantalla queda en negro.
-  // Se debe quitar esta linea (dejando el bloque `if (DEV_SERVER_URL)` de
-  // abajo tal cual) una vez resuelto el problema, antes de la entrega final.
-  win.webContents.openDevTools({ mode: 'detach' })
-
   if (DEV_SERVER_URL) {
     log(`Cargando dev server: ${DEV_SERVER_URL}`)
     win.loadURL(DEV_SERVER_URL)
+    win.webContents.openDevTools({ mode: 'detach' })
   } else {
     const distIndex = path.join(__dirname, '..', 'dist', 'index.html')
-    log(`Cargando build estatico: ${distIndex} (existe: ${fs.existsSync(distIndex)})`)
-    win.loadFile(distIndex)
-      .then(() => log('loadFile resuelto sin error.'))
-      .catch((err) => log(`[loadFile error] ${err?.stack || err}`))
+    log(`Cargando ${APP_ORIGIN}/index.html (dist existe: ${fs.existsSync(distIndex)})`)
+    win.loadURL(`${APP_ORIGIN}/index.html`)
+      .then(() => log('loadURL resuelto sin error.'))
+      .catch((err) => log(`[loadURL error] ${err?.stack || err}`))
   }
 }
 
 app.whenReady().then(async () => {
   log('app.whenReady().')
   try {
+    registrarProtocoloApp()
     await iniciarBaseLocal()
     registrarCanalesIpc()
     crearVentana()

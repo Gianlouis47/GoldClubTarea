@@ -17,3 +17,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Login local: verifica el hash bcrypt de usuarios.password_hash. */
   dbAuth: (credenciales) => ipcRenderer.invoke('db:auth', credenciales),
 })
+
+// DIAGNOSTICO TEMPORAL (pantalla en negro): cualquier error de JavaScript de
+// la pagina se reenvia al proceso principal para que quede en el archivo de
+// log, sin depender de que se puedan abrir las DevTools.
+window.addEventListener('error', (e) => {
+  ipcRenderer.send('diag:error', `window.onerror: ${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`)
+})
+window.addEventListener('unhandledrejection', (e) => {
+  ipcRenderer.send('diag:error', `unhandledrejection: ${e.reason?.stack || e.reason}`)
+})
