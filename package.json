@@ -2,73 +2,23 @@
   "name": "goldclub",
   "private": true,
   "version": "1.0.0",
-  "description": "Sistema de inventario y ventas para Gold Club (bar/discoteca), empaquetable como app de escritorio con Electron.",
-  "author": "Gold Club",
   "type": "module",
-  "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "electron:dev": "node electron/dev.js",
-    "electron:build": "vite build && electron-builder --linux --win --mac",
-    "electron:build:linux": "vite build && electron-builder --linux",
-    "electron:build:win": "vite build && electron-builder --win",
-    "electron:build:mac": "vite build && electron-builder --mac"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
-    "bcryptjs": "^3.0.3",
     "bootstrap": "^5.3.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.2",
-    "sql.js": "^1.14.1"
+    "react-router-dom": "^6.26.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "electron": "^43.3.0",
-    "electron-builder": "^26.15.3",
     "vite": "^5.4.2"
-  },
-  "build": {
-    "appId": "com.goldclub.inventario",
-    "productName": "GoldClub",
-    "publish": null,
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "src/lib/local/**/*",
-      "package.json"
-    ],
-    "asarUnpack": [
-      "node_modules/sql.js/dist/*.wasm"
-    ],
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "category": "Office"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ]
-    },
-    "mac": {
-      "target": [
-        "dir"
-      ],
-      "identity": null
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
   }
 }
